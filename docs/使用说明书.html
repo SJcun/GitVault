@@ -1,0 +1,471 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>GitVault 使用说明书</title><style>:root{color-scheme:light;--ink:#20313b;--muted:#607580;--green:#12685c;--line:#dfe8e6}
+*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:24px}body{margin:0;background:#f3f6f5;color:var(--ink);font:16px/1.85 "Microsoft YaHei UI","PingFang SC",sans-serif}header{background:#153f37;color:white;padding:32px max(28px,calc((100vw - 1220px)/2));}header b{font-size:26px;letter-spacing:.5px}header p{margin:6px 0 0;color:#c4ddd6;font-size:14px}.layout{display:grid;grid-template-columns:230px minmax(0,950px);gap:28px;max-width:1260px;margin:30px auto;padding:0 24px}nav{position:sticky;top:24px;align-self:start;padding:20px 14px;background:white;border:1px solid var(--line);border-radius:12px}nav strong{display:block;margin:0 10px 12px;color:var(--green)}nav a{display:block;padding:9px 10px;line-height:1.6;font-size:13px;border-radius:5px;color:var(--ink);text-decoration:none}nav a:hover{background:#e8f2ee}main{min-width:0;background:white;padding:40px 44px;border:1px solid var(--line);border-radius:12px}h1{font-size:32px;line-height:1.35;margin:0 0 15px}h2{font-size:23px;line-height:1.55;margin:44px 0 18px;padding-top:24px;border-top:1px solid var(--line);color:var(--green)}h3{font-size:18px;margin:26px 0 12px}p{margin:14px 0}a{color:var(--green)}strong{font-weight:700}li{margin:9px 0;padding-left:4px}table{display:block;overflow-x:auto;border-collapse:collapse;width:100%;font-size:14px;margin:22px 0}th,td{border:1px solid var(--line);padding:12px 14px;text-align:left;vertical-align:top;min-width:110px}th{background:#edf5f1;color:#174e41}tr:nth-child(even){background:#fafcfb}code{font-family:Consolas,"Microsoft YaHei UI",monospace;font-size:.92em;background:#edf3f0;padding:2px 5px;border-radius:4px;overflow-wrap:anywhere}pre{background:#f2f6f4;border:1px solid var(--line);border-radius:8px;padding:20px;overflow-x:auto;font-size:13px;line-height:1.65}pre code{background:none;padding:0;white-space:pre;overflow-wrap:normal}hr{border:0;border-top:1px solid var(--line);margin-top:36px}footer{max-width:1260px;margin:0 auto;padding:0 28px 30px;color:var(--muted);font-size:12px}@media(max-width:950px){.layout{display:block;padding:0 16px;margin-top:16px}nav{position:static;margin-bottom:16px}nav a{display:inline-block;margin:3px;border:1px solid var(--line)}main{padding:24px}h1{font-size:27px}header{padding:24px}pre{font-size:12px}}@media print{body{background:white;font-size:11pt}header,nav,footer{display:none}.layout{display:block;max-width:none;margin:0;padding:0}main{border:0;padding:0}h2,h3{break-after:avoid}table{display:table;font-size:10pt}tr{break-inside:avoid}pre{white-space:pre-wrap;font-size:8pt}a{color:inherit;text-decoration:none}}</style></head><body><header><b>GitVault · 使用说明书</b><p>第一次使用 / 换电脑 / 日常同步 / 按钮与问题排查 · V1</p></header><div class="layout"><nav aria-label="章节导航"><strong>选择你要做的事</strong><a href="#section">一、先弄清三个位置</a>
+<a href="#section-1">二、界面上每块区域是干什么的</a>
+<a href="#a-u">三、第一次使用：把电脑 A 的项目放进 U 盘</a>
+<a href="#section-3">四、在另一台电脑上使用：先克隆一份</a>
+<a href="#section-5">五、如果另一台电脑已经有项目：使用“绑定”</a>
+<a href="#section-6">六、每天怎么用</a>
+<a href="#section-8">七、看状态决定点哪个按钮</a>
+<a href="#section-9">八、常见问题</a>
+<a href="#section-16">九、按钮速查表</a></nav><main><h1 id="gitvault">GitVault 使用说明书</h1>
+<p>适用于当前 V1 Windows 版本。按界面实际按钮编写。</p>
+<p><strong>先记住：开始工作前，把 U 盘里的更新拉下来；工作结束后，先提交代码，再推送到 U 盘。</strong></p>
+<table>
+<thead>
+<tr>
+<th>你现在想做什么</th>
+<th>从这里开始</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>第一次把现有项目放到 U 盘</td>
+<td>看第三部分“第一次使用”</td>
+</tr>
+<tr>
+<td>换了一台电脑，电脑上还没有这个项目</td>
+<td>看第四部分“在另一台电脑上使用”</td>
+</tr>
+<tr>
+<td>另一台电脑已经有同一个 Git 项目</td>
+<td>看第五部分“绑定已有项目”</td>
+</tr>
+<tr>
+<td>已经设置好了，今天继续工作</td>
+<td>看第六部分“每天怎么用”</td>
+</tr>
+<tr>
+<td>按钮是灰的，或者报错了</td>
+<td>看第七、八部分</td>
+</tr>
+</tbody>
+</table>
+<h2 id="section">一、先弄清三个位置</h2>
+<p>下面一直用同一个例子。路径都是示例，请换成你自己的盘符和目录。</p>
+<table>
+<thead>
+<tr>
+<th>位置</th>
+<th>示例</th>
+<th>用来干什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>电脑 A 的项目目录</td>
+<td><code>D:\Projects\MyTool</code></td>
+<td>在这里打开工程、改代码、提交</td>
+</tr>
+<tr>
+<td>U 盘上的 Vault 目录</td>
+<td><code>F:\GitVault</code></td>
+<td>集中存放多个项目，随 U 盘带走</td>
+</tr>
+<tr>
+<td>电脑 B 的项目目录</td>
+<td><code>C:\Code\MyTool</code></td>
+<td>在另一台电脑上继续开发</td>
+</tr>
+</tbody>
+</table>
+<pre><code class="language-text">电脑 A                    U 盘                     电脑 B
+D:\Projects\MyTool   ⇄   F:\GitVault          ⇄   C:\Code\MyTool
+编辑、提交代码             保存 Git 仓库             编辑、提交代码
+</code></pre>
+<p><strong>Vault 可以理解为“U 盘上的项目仓库总目录”。</strong> 一个 Vault 可以放多个项目，一般只需要创建一次。</p>
+<p>程序会把示例项目存为 <code>F:\GitVault\repos\MyTool.git</code>。这是 Git 使用的存储目录，里面不一定能直接看到平时的源代码文件；它不是用来打开工程、直接编辑代码的目录。日常开发仍在电脑 A 或 B 的项目目录中进行。</p>
+<p>程序所在目录与 Vault 目录可以分开。创建 Vault 要选空目录，别把装有 <code>GitVault.exe</code> 和许多 DLL 的程序目录当作新 Vault。</p>
+<h2 id="section-1">二、界面上每块区域是干什么的</h2>
+<p>下面是位置示意，不是真实截图。</p>
+<pre><code class="language-text">┌──────────────────────────────────────────────────────────┐
+│ GitVault                   [打开 Vault] [新建 Vault] [设置]│ ①
+├──────────────────────────────────────────────────────────┤
+│ Vault 名称和路径       [选择位置 ▾] 已连接 [扫描设备][刷新]│ ②
+├───────────────────┬──────────────────────────────────────┤
+│ 仓库              │ MyTool                               │
+│ [搜索框]          │ 本地工作目录             [打开目录]  │
+│ [＋加入本地项目]  │ U 盘裸仓库                           │
+│                   │                                      │
+│ MyTool            │ 当前分支：main                       │ ④
+│ OtherProject      │ 本地领先 / U 盘领先 / 已同步         │
+│                   │                                      │
+│                   │ [推送][拉取][克隆到本机][绑定已有项目]│
+│                   │ 最近提交                             │
+│ [恢复未登记仓库]  │                                      │
+│        ③          │                                      │
+├───────────────────┴──────────────────────────────────────┤
+│ 操作结果                         [取消操作，仅操作中出现]│ ⑤
+│ ▸ 操作日志                                  [复制日志]  │
+└──────────────────────────────────────────────────────────┘
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>区域</th>
+<th>你需要关注什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>① 右上角</td>
+<td>第一次用“新建 Vault”；已有 Vault 用“打开 Vault”；找不到 Git 时进“设置”</td>
+</tr>
+<tr>
+<td>② 设备区域</td>
+<td>确认路径是你想用的 U 盘，且显示“已连接”；换盘后可点“扫描设备”</td>
+</tr>
+<tr>
+<td>③ 左侧列表</td>
+<td>点击项目名称，右侧才会显示这个项目的操作；搜索框只按名称筛选列表</td>
+</tr>
+<tr>
+<td>④ 右侧详情</td>
+<td>检查本地目录、当前分支和领先状态，再决定推送还是拉取</td>
+</tr>
+<tr>
+<td>⑤ 底部</td>
+<td>等待操作结束；失败时展开“操作日志”，里面有具体原因</td>
+</tr>
+</tbody>
+</table>
+<p>“最近提交”是当前本地分支的提交记录。第一次在新电脑上打开 Vault，还没有克隆或绑定时，这里为空是正常的。</p>
+<h2 id="a-u">三、第一次使用：把电脑 A 的项目放进 U 盘</h2>
+<h3 id="git">第 1 步：打开程序，确认项目已经使用 Git</h3>
+<p>解压整个发布包，然后双击 <code>GitVault.exe</code>。不要只复制一个 exe 文件出来运行。</p>
+<p>这个工具传输的是 <strong>Git 已经提交过的代码</strong>。开始前，你的 <code>D:\Projects\MyTool</code> 应当已经是 Git 项目，而且至少做过一次提交。</p>
+<p>如果只是一个普通代码文件夹，请先用原来的开发工具或 Git 客户端为它创建 Git 仓库并做首次提交。GitVault 当前没有“创建本地 Git 仓库”和“提交代码”按钮。</p>
+<p>如果程序提示找不到 Git：</p>
+<ol>
+<li>点击右上角“设置”。</li>
+<li>在“Git 可执行文件”里保留 <code>git</code>（本机环境能找到 Git 时），或点击“浏览…”选择已安装的 <code>git.exe</code>。</li>
+<li>例如 Git 安装在默认位置时，文件可能是 <code>C:\Program Files\Git\cmd\git.exe</code>；以你电脑实际位置为准。</li>
+<li>点“确定”，等底部显示验证完成；再点“扫描设备”继续。</li>
+</ol>
+<p>发布包带有 .NET 运行时，但不包含 Git。如果电脑没有安装 Git，也没有便携 Git，需要先准备 Git。</p>
+<h3 id="u">第 2 步：创建 U 盘仓库总目录</h3>
+<p>插上 U 盘。假设它现在是 <code>F:</code>。</p>
+<ol>
+<li>点击右上角 <strong>“新建 Vault”</strong>。</li>
+<li>按下表填写。</li>
+<li>点击“确定”。</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>输入框</th>
+<th>示例填写</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Vault 名称</td>
+<td><code>我的代码库</code></td>
+<td>界面上的显示名称，可自行取名</td>
+</tr>
+<tr>
+<td>Vault 目录</td>
+<td><code>F:\GitVault</code></td>
+<td>必须是不存在的新目录，或已经存在的空目录</td>
+</tr>
+</tbody>
+</table>
+<p><strong>目录选择小提示：</strong>“浏览…”选择的是已有文件夹。如果 <code>F:\GitVault</code> 还不存在，可以直接在输入框里填写完整路径；也可以先在资源管理器里建一个空的 <code>GitVault</code> 文件夹，再浏览选择它。</p>
+<p>不要直接选择装有其他文件的 <code>F:\</code> 根目录。也不要选择已经有 <code>vault.json</code> 的目录来“新建”；已有 Vault 应用“打开 Vault”。</p>
+<p>**做对后的结果：**顶部出现“我的代码库”、<code>F:\GitVault</code> 和“已连接”；左边还没有项目，但“＋ 加入本地项目”可以点击了。</p>
+<h3 id="section-2">第 3 步：加入你的本地项目</h3>
+<ol>
+<li>点击左侧 <strong>“＋ 加入本地项目”</strong>。</li>
+<li>按下表填写。</li>
+<li>点击“确定”，等待底部不再显示操作进行中。</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>输入框</th>
+<th>示例填写</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>本地 Git 工作区根目录</td>
+<td><code>D:\Projects\MyTool</code></td>
+<td>选择你平时打开工程的项目根目录</td>
+</tr>
+<tr>
+<td>U 盘仓库名称</td>
+<td><code>MyTool</code></td>
+<td>填名称即可，程序会自动添加 <code>.git</code> 后缀</td>
+</tr>
+</tbody>
+</table>
+<p>选择的是 <code>MyTool</code> 项目目录，<strong>不是</strong>它里面的 <code>.git</code> 目录，也不是存放所有项目的 <code>D:\Projects</code> 总目录。</p>
+<p>**做对后的结果：**左侧出现 <code>MyTool</code>；右侧显示本地目录和 U 盘目录，已绑定到这台电脑。正常情况下，当前分支会显示“已同步”。首次导入已经把已有提交复制过去，不需要再重复点一次“推送”。</p>
+<p>未提交的文件不会导入。如果你最近改过代码但还没有提交，请在原来的工具里提交，再回来刷新、推送。</p>
+<h2 id="section-3">四、在另一台电脑上使用：先克隆一份</h2>
+<p>适用情况：电脑 B 上还没有这个项目。</p>
+<h3 id="vault">第 1 步：打开同一个 Vault</h3>
+<ol>
+<li>电脑 A 上的操作完成后，通过 Windows 正常弹出 U 盘。</li>
+<li>将 U 盘插到电脑 B，打开 GitVault。</li>
+<li>如果没有自动出现项目，点击右上角 <strong>“打开 Vault”</strong>。</li>
+<li>选择 U 盘中<strong>包含 <code>vault.json</code> 的目录</strong>。</li>
+</ol>
+<p>例如盘符变成 <code>G:</code>，这次选 <code>G:\GitVault</code>。不要选 <code>G:\GitVault\repos</code> 或里面的 <code>MyTool.git</code>。</p>
+<p><strong>同一块 U 盘到了另一台电脑，不需要再次“新建 Vault”。</strong></p>
+<h3 id="section-4">第 2 步：选择项目并克隆</h3>
+<ol>
+<li>点击左侧 <code>MyTool</code>。正常会显示“本机未绑定”。</li>
+<li>点击右侧 <strong>“克隆到本机”</strong>。</li>
+<li>按下表填写，然后点“确定”。</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>输入框</th>
+<th>示例填写</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>目标父目录</td>
+<td><code>C:\Code</code></td>
+<td>这个文件夹要已经存在</td>
+</tr>
+<tr>
+<td>新文件夹名称</td>
+<td><code>MyTool</code></td>
+<td>程序会在父目录下创建这个文件夹</td>
+</tr>
+</tbody>
+</table>
+<p>最终得到的项目路径是 <strong><code>C:\Code\MyTool</code></strong>。</p>
+<p>不要把“目标父目录”填成 <code>C:\Code\MyTool</code>，又把“新文件夹名称”填成 <code>MyTool</code>，否则会多出一层同名目录。也不要提前建好最终的 <code>C:\Code\MyTool</code>，即使是空文件夹，当前版本也会拒绝覆盖。</p>
+<p>**做对后的结果：**右侧“本地工作目录”变为 <code>C:\Code\MyTool</code>，当前分支显示“已同步”，下面出现最近提交。点击“打开目录”能看到源代码，再用你的开发工具打开工程。</p>
+<p>克隆只需做一次。以后这台电脑继续使用同一个目录，日常点“推送”或“拉取”即可。</p>
+<h2 id="section-5">五、如果另一台电脑已经有项目：使用“绑定”</h2>
+<p>适用情况：电脑 B 已经有一份同一 Git 项目的工作目录，不需要再克隆。</p>
+<ol>
+<li>打开 U 盘上的 Vault。</li>
+<li>在左侧选中 <code>MyTool</code>。</li>
+<li>点击 <strong>“绑定已有项目”</strong>。</li>
+<li>选择电脑 B 上现有的项目根目录，例如 <code>C:\Code\MyTool</code>。</li>
+<li>等检查完成，看右侧是否显示正确的本地目录。</li>
+</ol>
+<p>绑定只是告诉程序“这个 U 盘仓库对应这台电脑的哪个项目”。它不会立即覆盖本地文件，也不会自动推送或拉取。绑定完成后，继续根据右侧状态决定操作。</p>
+<p>本地项目需要与 U 盘仓库具有共同的 Git 历史，当前分支也要同名。只复制源代码、再重新创建一个 Git 仓库，即使文件相同，也可能不能绑定。</p>
+<p>如果提示先切换分支，请用原来的 Git 工具切到 U 盘已有的同名分支，例如 <code>main</code>，再回来绑定。</p>
+<p>如果移动了本机项目目录，也可以重新绑定到新位置。一个 U 盘仓库在每台电脑上只记录一个本地目录；重新绑定会替换这台电脑的旧对应关系，旧目录不会被删除。</p>
+<h2 id="section-6">六、每天怎么用</h2>
+<h3 id="u-1">开始工作前：先接收 U 盘里的更新</h3>
+<ol>
+<li>插入 U 盘，打开 GitVault。</li>
+<li>确认顶部是正确的 Vault，点击左侧项目。</li>
+<li>点 <strong>“刷新”</strong>，看“当前分支”和同步状态。</li>
+<li>如果显示 <strong>“U 盘领先 N 次提交”</strong>，且工作区干净，点 <strong>“↓ 从 U 盘拉取”</strong>。</li>
+<li>等待完成、状态变成“当前分支已同步”，再开始改代码。</li>
+</ol>
+<p>如果本来就是“已同步”，无需再点拉取。</p>
+<h3 id="u-2">工作结束后：先提交，再送到 U 盘</h3>
+<ol>
+<li>保存代码文件。</li>
+<li>在你原来的开发工具或 Git 客户端中完成 <strong>提交（Commit）</strong>。</li>
+<li>回到 GitVault，点 <strong>“刷新”</strong>。</li>
+<li>看到 <strong>“本地领先 N 次提交”</strong>，点 <strong>“↑ 推送到 U 盘”</strong>。</li>
+<li>等操作结束，并确认“当前分支已同步”，再弹出 U 盘。</li>
+</ol>
+<p><strong>保存文件不等于 Git 提交。</strong> 如果只保存了文件却没有提交，GitVault 不会把这些改动推送走。界面可能同时显示“当前分支已同步”和“工作区有修改”：前者比较的是已提交历史，后者说明本机还有没提交的文件。</p>
+<h3 id="section-7">要同步多个分支时</h3>
+<p>右侧“当前分支”决定本次同步哪一个分支。比如显示 <code>main</code>，推送按钮就只处理 <code>main</code>。</p>
+<p>需要处理另一个分支时，在原来的 Git 工具中切换分支，再回来刷新。后续推送/拉取不会自动同步所有分支和标签。</p>
+<p>如果出现“在 U 盘创建此分支”，说明本机当前分支还没有对应的 U 盘分支。确实想把它带走时，点击这个按钮即可。</p>
+<h2 id="section-8">七、看状态决定点哪个按钮</h2>
+<table>
+<thead>
+<tr>
+<th>界面显示</th>
+<th>是什么意思</th>
+<th>你该怎么做</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>本机未绑定</td>
+<td>程序不知道这台电脑的项目在哪</td>
+<td>没有项目就“克隆到本机”，已有项目就“绑定已有项目”</td>
+</tr>
+<tr>
+<td>当前分支已同步</td>
+<td>两边当前分支的已提交历史一致</td>
+<td>无需传输；另看是否有未提交修改</td>
+</tr>
+<tr>
+<td>本地领先 3 次提交</td>
+<td>电脑上有 3 个 U 盘还没有的提交</td>
+<td>点“推送到 U 盘”</td>
+</tr>
+<tr>
+<td>U 盘领先 2 次提交</td>
+<td>U 盘有 2 个电脑上还没有的提交</td>
+<td>工作区干净时点“从 U 盘拉取”</td>
+</tr>
+<tr>
+<td>已分叉：本地 2 / U 盘 1</td>
+<td>两边各自增加了提交，不能直接接上</td>
+<td>先用其他 Git 工具整合，见下一部分</td>
+</tr>
+<tr>
+<td>U 盘没有同名分支</td>
+<td>本机正在使用一个新分支</td>
+<td>需要带走它时，点“在 U 盘创建此分支”</td>
+</tr>
+<tr>
+<td>工作区有修改</td>
+<td>有修改、暂存或未跟踪文件尚未形成提交</td>
+<td>先处理这些文件；拉取会被禁用</td>
+</tr>
+<tr>
+<td>U 盘离线 / 数据已过期</td>
+<td>上一次状态不能再用于判断</td>
+<td>插盘，点“扫描设备”；找不到就“打开 Vault”</td>
+</tr>
+<tr>
+<td>刷新失败 / 操作未完成</td>
+<td>当前结果不确定</td>
+<td>展开底部“操作日志”查看原因，处理后刷新</td>
+</tr>
+</tbody>
+</table>
+<p>“领先几次提交”不是“多了几个文件”。一个提交可能改动多个文件。</p>
+<h2 id="section-9">八、常见问题</h2>
+<h3 id="section-10">1. “加入本地项目”为什么是灰色的？</h3>
+<p>先看顶部是否显示“已连接”。还没有创建或打开 Vault 时，这个按钮不能用。正在执行其他操作时，也会临时禁用。</p>
+<h3 id="section-11">2. 推送和拉取为什么都不能点？</h3>
+<p>按这个顺序看：</p>
+<ol>
+<li>左边有没有选中项目？</li>
+<li>U 盘是否已连接？</li>
+<li>右边是否显示正确的本地目录？没有就先克隆或绑定。</li>
+<li>点刷新后是什么状态？如果已同步，两个按钮变灰是正常的。</li>
+<li>如果分叉、刷新失败或仓库状态不支持，需要先处理提示中的问题。</li>
+</ol>
+<p>通常“本地领先”时只亮推送，“U 盘领先且工作区干净”时只亮拉取，不需要两个按钮同时可用。</p>
+<h3 id="u-3">3. 显示 U 盘领先，但还是不能拉取？</h3>
+<p>检查是否显示“工作区有修改”。请回开发工具处理本机修改：需要保留的可以提交或使用 Git 的 stash 临时收起；不需要的也应在确认后由你自己处理。</p>
+<p>不要为了点亮拉取按钮，直接删除看不懂的文件。GitVault 不会替你丢弃修改，也不会自动 stash。</p>
+<p>如果把本地修改提交了，两边可能变成“已分叉”，这时需要先整合提交。</p>
+<h3 id="section-12">4. “已分叉”怎么办？</h3>
+<p>常见原因是：电脑 A 的新提交还没拉到电脑 B，电脑 B 又独立做了新提交。</p>
+<p>当前版本没有一键合并按钮。请用熟悉的 Git 工具把 U 盘分支抓取到本机，再进行合并或变基；处理完冲突和未完成操作后，回 GitVault 刷新，再推送整合后的分支。</p>
+<p>如果不熟悉合并，先保留两边现状，把状态和日志提供给协助你的人。不要反复克隆覆盖原目录，也不要强制推送。</p>
+<p>以后尽量保持“开始前先拉取，结束后提交并推送”，可以减少这种情况。</p>
+<h3 id="u-4">5. 换电脑后 U 盘变了盘符，要重新创建吗？</h3>
+<p>不需要。先点“扫描设备”；如果没有识别出来，点“打开 Vault”，选择新盘符下包含 <code>vault.json</code> 的原目录，例如 <code>G:\GitVault</code>。</p>
+<p>如果顶部列表出现多个位置，请看清路径，选择实际要用的 U 盘。</p>
+<h3 id="u-5">6. 已经用命令建过 U 盘裸仓库，能直接打开吗？</h3>
+<p>“打开 Vault”需要选择含有 <code>vault.json</code> 的 Vault 总目录，不能直接选一个普通的 <code>MyTool.git</code> 文件夹。</p>
+<p>当前版本没有任意位置裸仓库的一键导入入口。最容易操作的方式是：新建一个空 Vault，再从完整的本地 Git 项目使用“加入本地项目”。先保留原来的 U 盘仓库。</p>
+<p>左下角“恢复未登记仓库”只查找当前 Vault 的 <code>repos</code> 目录下已有的 <code>.git</code> 裸仓库，主要用于恢复中途登记失败的项目，不是“打开任何 Git 仓库”的按钮。</p>
+<h3 id="section-13">7. 提示目标目录已经存在怎么办？</h3>
+<ul>
+<li>**加入项目时：**当前 Vault 里可能已有同名目录。先看左侧是否已有该项目；正常使用无需重复导入。若目录存在但列表没有，可检查“恢复未登记仓库”。</li>
+<li>**克隆时：**选择一个尚不存在的新文件夹名称。如果现有文件夹本来就是同一个 Git 项目，用“绑定已有项目”。</li>
+</ul>
+<h3 id="u-6">8. 取消了操作，或者中途拔了 U 盘怎么办？</h3>
+<p>重新插入 U 盘，打开或扫描 Vault，再刷新状态。取消不代表所有动作已回滚，不能仅凭“已取消”判断数据有没有传过去。</p>
+<p>失败可能留下 <code>.import-*</code> 或 <code>.gitvault-clone-*</code> 临时目录；日常无需操作它们。确认没有任务运行后，再根据日志检查和处理。不要直接删除原项目目录。</p>
+<h3 id="section-14">9. “恢复未登记仓库”什么时候用？</h3>
+<p>主要用于这种情况：U 盘仓库已经复制完成，但程序保存清单失败，左侧没有出现该项目。</p>
+<p>打开对应 Vault，点“恢复未登记仓库”，等待完成；在日志中可查看恢复数量。这个按钮会把检查通过的仓库登记到列表，<strong>不会自动绑定本机目录，也不会找回未提交的代码</strong>。恢复后按需要绑定已有项目或克隆。</p>
+<h3 id="section-15">10. 日志从哪里看？</h3>
+<p>点击窗口最下方的“操作日志”展开。需要协助排查时，点“复制日志”，保留其中的报错部分和当时做的操作。</p>
+<p>本机日志文件还保存在 <code>%LocalAppData%\GitVault</code>。通常直接从界面复制更方便。</p>
+<h3 id="lfs-head">11. 提示 LFS、子模块、浅克隆或 HEAD 未附着到分支？</h3>
+<p>这些是当前版本不支持自动同步的仓库状态，不是缺少某个按钮。请先用原来的 Git 工具处理对应状态。HEAD 未附着到分支时，通常需要先切换到一个正常的本地分支；未完成合并或变基时，需要先完成或正确结束该操作。</p>
+<h2 id="section-16">九、按钮速查表</h2>
+<table>
+<thead>
+<tr>
+<th>按钮</th>
+<th>什么时候用</th>
+<th>会做什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>新建 Vault</td>
+<td>第一次准备 U 盘仓库总目录</td>
+<td>创建 Vault 标识与 repos 目录</td>
+</tr>
+<tr>
+<td>打开 Vault</td>
+<td>使用已建好的 Vault</td>
+<td>读取所选目录中的仓库清单</td>
+</tr>
+<tr>
+<td>设置</td>
+<td>Git 找不到或要换 Git 程序</td>
+<td>设置并验证 git.exe 路径</td>
+</tr>
+<tr>
+<td>扫描设备</td>
+<td>插盘、换盘符、查找 Vault</td>
+<td>重新发现设备位置</td>
+</tr>
+<tr>
+<td>刷新</td>
+<td>提交、切分支后，或检查同步状态</td>
+<td>抓取并比较分支；不会自动合并工作区代码</td>
+</tr>
+<tr>
+<td>＋ 加入本地项目</td>
+<td>第一次把已有本地项目放进 Vault</td>
+<td>创建 U 盘裸仓库，并自动绑定当前电脑</td>
+</tr>
+<tr>
+<td>克隆到本机</td>
+<td>当前电脑还没有项目</td>
+<td>新建本地工作目录，并绑定它</td>
+</tr>
+<tr>
+<td>绑定已有项目</td>
+<td>当前电脑已经有同一 Git 项目</td>
+<td>检查历史并记录对应目录</td>
+</tr>
+<tr>
+<td>↑ 推送到 U 盘</td>
+<td>本地领先</td>
+<td>把当前分支的已提交内容送到 U 盘</td>
+</tr>
+<tr>
+<td>↓ 从 U 盘拉取</td>
+<td>U 盘领先且本地工作区干净</td>
+<td>快进更新本地当前分支和文件</td>
+</tr>
+<tr>
+<td>打开目录</td>
+<td>想用资源管理器查看本机项目</td>
+<td>打开本地工作目录</td>
+</tr>
+<tr>
+<td>恢复未登记仓库</td>
+<td>裸仓库已在 repos 中，但清单未登记</td>
+<td>检查并恢复列表登记</td>
+</tr>
+<tr>
+<td>取消操作</td>
+<td>当前传输需要停止</td>
+<td>请求终止任务，之后需刷新复核</td>
+</tr>
+<tr>
+<td>复制日志</td>
+<td>排查错误</td>
+<td>复制当前界面的近期操作记录</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<p><strong>日常只记这一行：插盘 → 选项目 → 刷新 → 有更新先拉取 → 开发并提交 → 刷新 → 推送 → 等待完成再拔盘。</strong></p>
+</main></div><footer>离线文档，无需联网。示意图用于说明按钮位置，不是真实截图。可使用浏览器打印功能打印本手册。</footer></body></html>
