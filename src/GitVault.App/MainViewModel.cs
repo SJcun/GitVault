@@ -38,10 +38,10 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private bool isBusy;
     /// <summary>当前 Vault 是否可用。</summary>
     [ObservableProperty] private bool isOnline;
-    /// <summary>顶部 Vault 标题。</summary>
-    [ObservableProperty] private string vaultTitle = "打开你的离线代码库";
-    /// <summary>顶部 Vault 路径说明。</summary>
-    [ObservableProperty] private string vaultPath = "创建一个 Vault，或选择 U 盘上的已有目录。";
+    /// <summary>顶部代码库标题。</summary>
+    [ObservableProperty] private string vaultTitle = "尚未连接 U 盘代码库";
+    /// <summary>顶部代码库路径说明。</summary>
+    [ObservableProperty] private string vaultPath = "插入 U 盘后将自动识别；也可以手动选择或创建代码库。";
     /// <summary>列表搜索条件。</summary>
     [ObservableProperty] private string search = "";
     /// <summary>当前选中的仓库。</summary>
@@ -78,8 +78,10 @@ public partial class MainViewModel : ObservableObject
     public bool CanOpenLocal => SelectedItem?.LocalPath is { } path && Directory.Exists(path);
     /// <summary>有选择时显示详情。</summary>
     public bool HasSelection => SelectedItem is not null;
-    /// <summary>无选择时显示引导。</summary>
-    public bool ShowWelcome => SelectedItem is null;
+    /// <summary>未连接代码库时显示空状态页面。</summary>
+    public bool ShowDisconnected => current is null || !IsOnline;
+    /// <summary>已连接但无选择时显示引导。</summary>
+    public bool ShowWelcome => SelectedItem is null && !ShowDisconnected;
     /// <summary>仓库尚未绑定。</summary>
     public bool NeedsBinding => SelectedItem is { LocalPath: null };
     /// <summary>当前仓库名称。</summary>
@@ -133,9 +135,9 @@ public partial class MainViewModel : ObservableObject
         });
     }
 
-    /// <summary>重新发现设备，不对相同身份的多个位置作隐式选择。</summary>
+    /// <summary>重新发现 U 盘设备，不对相同身份的多个位置作隐式选择。</summary>
     [RelayCommand(CanExecute = nameof(CanWork))]
-    private Task DiscoverAsync() => ExecuteAsync("扫描 Vault", DiscoverCoreAsync);
+    private Task DiscoverAsync() => ExecuteAsync("扫描 U 盘", DiscoverCoreAsync);
 
     /// <summary>获取候选位置并在唯一匹配时恢复连接。</summary>
     private async Task DiscoverCoreAsync(CancellationToken token)
@@ -149,30 +151,59 @@ public partial class MainViewModel : ObservableObject
         {
             IsOnline = false;
             SelectedVault = null;
-            foreach (var item in Items) item.Invalidate("等待选择 Vault 位置");
-            Feedback = "发现多个候选位置，请从顶部列表明确选择。";
+            foreach (var item in Items) item.Invalidate("等待选择代码库");
+            Feedback = "发现多个 U 盘代码库，请从顶部列表选择要使用的一个。";
         }
         else if (current is not null) MarkOffline();
+        else Feedback = "尚未发现 U 盘代码库 · 插入 U 盘后重试，或创建新的代码库。";
         UpdateDetails();
     }
 
-    /// <summary>手动选择任何位置的 Vault，包括固定磁盘形式的移动硬盘。</summary>
+    /// <summary>手动选择目录：按目录类型引导下一步，不要求用户认识内部配置文件。</summary>
     [RelayCommand(CanExecute = nameof(CanWork))]
-    private async Task OpenVaultAsync()
+    private async Task OpenLibraryAsync()
     {
-        var path = Dialogs.Folder("选择包含 vault.json 的目录");
+        var path = Dialogs.Folder("选择代码库目录");
         if (path is null) return;
-        await ExecuteAsync("打开 Vault", token => LoadVaultAsync(vaults.Open(path), token));
+        switch (vaults.Probe(path))
+        {
+            case DirectoryKind.LocalProject:
+                if (Dialogs.Confirm("检测到本地 Git 项目",
+                    $"这是一个本地 Git 项目：{path}\n如果希望把它保存到 U 盘，请先创建 U 盘代码库，再使用“加入 U 盘代码库”导入。\n要现在创建 U 盘代码库吗？",
+                    "创建 U 盘代码库"))
+                    await CreateLibraryAsync(null);
+                return;
+            case DirectoryKind.Plain:
+                if (Dialogs.Confirm("这里还不能打开代码库",
+                    Directory.EnumerateFileSystemEntries(path).Any()
+                        ? $"{path}\n这个目录里有其他文件，还不是 U 盘代码库。\n要在这里创建吗？需要先清空，或改用空目录。"
+                        : $"{path}\n这个目录是空的。要在这里创建 U 盘代码库吗？",
+                    "创建 U 盘代码库"))
+                    await CreateLibraryAsync(path);
+                return;
+            case DirectoryKind.Missing:
+                if (Dialogs.Confirm("这里还不能打开代码库",
+                    $"{path}\n这个目录还不存在。要在这里创建 U 盘代码库吗？",
+                    "创建 U 盘代码库"))
+                    await CreateLibraryAsync(path);
+                return;
+            default:
+                await ExecuteAsync("打开代码库", token => LoadVaultAsync(vaults.Open(path), token));
+                return;
+        }
     }
 
-    /// <summary>在空目录中创建 Vault。</summary>
+    /// <summary>在空目录中创建代码库。</summary>
     [RelayCommand(CanExecute = nameof(CanWork))]
-    private async Task CreateVaultAsync()
+    private Task CreateLibraryAsync() => CreateLibraryAsync(null);
+
+    /// <summary>创建代码库，支持按用户已选目录预填位置。</summary>
+    private async Task CreateLibraryAsync(string? suggestedPath)
     {
-        var input = Dialogs.Ask("创建 Vault", "请选择 U 盘上的空目录，或输入一个新的目录路径。",
-            new InputField("Vault 名称", "我的代码库"), new InputField("Vault 目录", "", "folder"));
+        var input = Dialogs.Ask("创建 U 盘代码库", "在 U 盘上选择空目录，或输入新的目录路径。一个代码库可以存放多个项目，随 U 盘带走。",
+            new InputField("代码库名称", "我的代码库"), new InputField("代码库目录", suggestedPath ?? "", "folder"));
         if (input is null) return;
-        await ExecuteAsync("创建 Vault", token => LoadVaultAsync(vaults.Create(input[1], input[0]), token));
+        await ExecuteAsync("创建代码库", token => LoadVaultAsync(vaults.Create(input[1], input[0]), token));
     }
 
     /// <summary>加载清单并恢复本机路径。</summary>
@@ -183,7 +214,7 @@ public partial class MainViewModel : ObservableObject
         if (loaded.Manifest.VaultId != location.Manifest.VaultId)
         {
             MarkOffline();
-            throw new IOException("此位置已被其他 Vault 占用，请重新打开正确的 Vault。");
+            throw new IOException("此位置已被其他代码库占用，请重新选择正确的目录。");
         }
         current = loaded;
         IsOnline = true;
@@ -207,10 +238,10 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanUseVault))]
     private async Task ImportAsync()
     {
-        var input = Dialogs.Ask("加入本地项目", "复制本地分支和标签中的已提交内容。已有 remote 保持不变。",
-            new InputField("本地 Git 工作区根目录", "", "folder"), new InputField("U 盘仓库名称"));
+        var input = Dialogs.Ask("加入 U 盘代码库", "把本地 Git 项目已提交的内容复制到 U 盘。不会修改本地仓库的现有 remote。",
+            new InputField("本地 Git 工作区根目录", "", "folder"), new InputField("在代码库中的名称"));
         if (input is null) return;
-        await ExecuteAsync("导入项目", async token =>
+        await ExecuteAsync("加入代码库", async token =>
         {
             var repository = await repositories.ImportAsync(current!, input[0], input[1], token);
             SaveBinding(repository, input[0]);
@@ -326,7 +357,7 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>登记清单写入失败后留下的完整裸仓库。</summary>
     [RelayCommand(CanExecute = nameof(CanUseVault))]
-    private Task RecoverAsync() => ExecuteAsync("恢复仓库登记", async token =>
+    private Task RecoverAsync() => ExecuteAsync("恢复仓库列表", async token =>
     {
         var count = await repositories.RecoverAsync(current!, token);
         AppendLog($"恢复登记 {count} 个仓库。");
@@ -426,7 +457,7 @@ public partial class MainViewModel : ObservableObject
     {
         IsOnline = false;
         foreach (var item in Items) item.Invalidate("U 盘离线 · 数据已过期");
-        Feedback = "未找到原 Vault，请插入 U 盘或重新选择位置。";
+        Feedback = "未找到原来的 U 盘代码库，请插入 U 盘或重新选择位置。";
     }
 
     /// <summary>保存日志并限制界面中展示的字符数。</summary>
@@ -450,9 +481,9 @@ public partial class MainViewModel : ObservableObject
     private void UpdateDetails()
     {
         foreach (var name in new[] { nameof(CanWork), nameof(CanUseVault), nameof(CanSelectLocal), nameof(CanPush), nameof(CanPull), nameof(CanOpenLocal),
-            nameof(HasSelection), nameof(ShowWelcome), nameof(NeedsBinding), nameof(DetailTitle), nameof(LocalPath), nameof(RemotePath), nameof(BranchText),
+            nameof(HasSelection), nameof(ShowDisconnected), nameof(ShowWelcome), nameof(NeedsBinding), nameof(DetailTitle), nameof(LocalPath), nameof(RemotePath), nameof(BranchText),
             nameof(StatusText), nameof(WorktreeText), nameof(Guidance), nameof(ConnectionText), nameof(PushLabel) }) OnPropertyChanged(name);
-        foreach (var command in new IRelayCommand[] { DiscoverCommand, OpenVaultCommand, CreateVaultCommand, ImportCommand, CloneCommand, BindCommand,
+        foreach (var command in new IRelayCommand[] { DiscoverCommand, OpenLibraryCommand, CreateLibraryCommand, ImportCommand, CloneCommand, BindCommand,
             RefreshCommand, PushCommand, PullCommand, RecoverCommand, SettingsCommand, OpenLocalCommand }) command.NotifyCanExecuteChanged();
     }
 
@@ -472,7 +503,7 @@ public partial class MainViewModel : ObservableObject
     /// <summary>用户明确选择设备时加载对应位置。</summary>
     partial void OnSelectedVaultChanged(VaultChoice? value)
     {
-        if (!IsBusy && value is not null) _ = ExecuteAsync("切换 Vault", token => LoadVaultAsync(value.Location, token));
+        if (!IsBusy && value is not null) _ = ExecuteAsync("切换代码库", token => LoadVaultAsync(value.Location, token));
     }
 }
 

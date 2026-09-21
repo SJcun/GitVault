@@ -10,17 +10,17 @@ public sealed class RepositoryService(GitCommandService git, VaultService vaults
         RequireSupported(local);
         ValidateName(name);
         var current = vaults.Open(vault.RootPath);
-        if (current.Manifest.VaultId != vault.Manifest.VaultId) throw new IOException("Vault 身份发生变化。");
+        if (current.Manifest.VaultId != vault.Manifest.VaultId) throw new IOException("代码库身份发生变化。");
         var repository = new VaultRepository { Name = name, RelativePath = $"repos/{name}.git" };
         var destination = vaults.RepositoryPath(current, repository);
-        if (Path.Exists(destination)) throw new IOException("目标仓库目录已经存在，请更换名称或恢复登记。");
+        if (Path.Exists(destination)) throw new IOException("代码库中已有同名项目，请更换名称，或使用“恢复仓库列表”。");
         var temporary = Path.Combine(Path.GetDirectoryName(destination)!, $".import-{Guid.NewGuid():N}");
         await git.RunAsync(null, ["clone", "--bare", "--no-hardlinks", "--progress", "--", Path.GetFullPath(localPath), temporary], token);
         await RequireBareAsync(temporary, token);
         await git.RunAsync(temporary, ["fsck", "--connectivity-only"], token);
         // clone --bare 已包含本地分支；不重复 push，也不修改源仓库的 remote。
         token.ThrowIfCancellationRequested();
-        if (vaults.Open(vault.RootPath).Manifest.VaultId != vault.Manifest.VaultId) throw new IOException("Vault 身份发生变化。");
+        if (vaults.Open(vault.RootPath).Manifest.VaultId != vault.Manifest.VaultId) throw new IOException("代码库身份发生变化。");
         Directory.Move(temporary, destination);
         vaults.Register(current, repository);
         return repository;
@@ -128,7 +128,7 @@ public sealed class RepositoryService(GitCommandService git, VaultService vaults
     public async Task<int> RecoverAsync(VaultLocation vault, CancellationToken token = default)
     {
         var current = vaults.Open(vault.RootPath);
-        if (current.Manifest.VaultId != vault.Manifest.VaultId) throw new IOException("Vault 身份发生变化。");
+        if (current.Manifest.VaultId != vault.Manifest.VaultId) throw new IOException("代码库身份发生变化。");
         var count = 0;
         foreach (var path in Directory.EnumerateDirectories(Path.Combine(current.RootPath, "repos"), "*.git"))
         {

@@ -8,8 +8,8 @@
         <Border Background="White" BorderBrush="#E1E7EB" BorderThickness="0,0,0,1" Padding="28,18">
             <DockPanel>
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" VerticalAlignment="Center">
-                    <Button Content="打开 Vault" Command="{Binding OpenVaultCommand}" />
-                    <Button Content="新建 Vault" Command="{Binding CreateVaultCommand}" />
+                    <Button Content="选择已有代码库" Command="{Binding OpenLibraryCommand}" />
+                    <Button Content="创建 U 盘代码库" Command="{Binding CreateLibraryCommand}" />
                     <Button Content="设置" Command="{Binding SettingsCommand}" Margin="0" />
                 </StackPanel>
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
@@ -27,9 +27,9 @@
                 <TextBlock Text="{Binding VaultPath}" Foreground="{StaticResource Muted}" Margin="0,5,0,0" TextTrimming="CharacterEllipsis" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
-                <ComboBox ItemsSource="{Binding VaultChoices}" SelectedItem="{Binding SelectedVault}" DisplayMemberPath="Label" Width="240" Padding="8" Margin="12,0" IsEnabled="{Binding CanWork}" AutomationProperties.Name="选择 Vault 位置" />
+                <ComboBox ItemsSource="{Binding VaultChoices}" SelectedItem="{Binding SelectedVault}" DisplayMemberPath="Label" Width="240" Padding="8" Margin="12,0" IsEnabled="{Binding CanWork}" AutomationProperties.Name="选择代码库位置" />
                 <TextBlock Text="{Binding ConnectionText}" Foreground="{StaticResource Accent}" VerticalAlignment="Center" Margin="0,0,18,0" />
-                <Button Content="扫描设备" Command="{Binding DiscoverCommand}" />
+                <Button Content="扫描 U 盘" Command="{Binding DiscoverCommand}" />
                 <Button Content="刷新" Command="{Binding RefreshCommand}" Margin="0" />
             </StackPanel>
         </Grid>
@@ -38,11 +38,11 @@
             <Border Background="White" CornerRadius="10" BorderBrush="#DFE6EA" BorderThickness="1">
                 <DockPanel Margin="16">
                     <StackPanel DockPanel.Dock="Top">
-                        <TextBlock Text="仓库" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,14" />
-                        <TextBox Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="搜索仓库" ToolTip="按仓库名称搜索" Margin="0,0,0,12" />
-                        <Button Content="＋ 加入本地项目" Command="{Binding ImportCommand}" Style="{StaticResource PrimaryButton}" Margin="0,0,0,16" />
+                        <TextBlock Text="U 盘项目" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,14" />
+                        <TextBox Text="{Binding Search, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="搜索项目" ToolTip="按项目名称搜索" Margin="0,0,0,12" />
+                        <Button Content="＋ 加入 U 盘代码库" Command="{Binding ImportCommand}" Style="{StaticResource PrimaryButton}" Margin="0,0,0,16" />
                     </StackPanel>
-                    <Button DockPanel.Dock="Bottom" Content="恢复未登记仓库" Command="{Binding RecoverCommand}" Margin="0,12,0,0" FontSize="12" ToolTip="查找 repos 中已创建但未写入清单的 .git 仓库" />
+                    <Button DockPanel.Dock="Bottom" Content="恢复仓库列表" Command="{Binding RecoverCommand}" Margin="0,12,0,0" FontSize="12" ToolTip="查找代码库中已创建但未加入列表的项目" />
                     <ListBox ItemsSource="{Binding FilteredItems}" SelectedItem="{Binding SelectedItem}" BorderThickness="0" Background="Transparent" ScrollViewer.HorizontalScrollBarVisibility="Disabled" IsEnabled="{Binding CanWork}">
                         <ListBox.ItemContainerStyle>
                             <Style TargetType="ListBoxItem">
@@ -64,17 +64,26 @@
             </Border>
             <Border Grid.Column="2" Background="White" CornerRadius="10" BorderBrush="#DFE6EA" BorderThickness="1" Padding="28">
                 <Grid>
+                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="460" Visibility="{Binding ShowDisconnected, Converter={StaticResource BoolVisibility}}">
+                        <TextBlock Text="尚未连接 U 盘代码库" FontSize="28" FontWeight="SemiBold" TextAlignment="Center" />
+                        <TextBlock Text="插入 U 盘后会自动识别其中的代码库。&#10;如果 U 盘已在电脑上，也可以手动扫描或选择目录。" TextAlignment="Center" Style="{StaticResource MutedText}" Margin="0,18,0,30" FontSize="15" />
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <Button Content="扫描 U 盘" Command="{Binding DiscoverCommand}" Style="{StaticResource PrimaryButton}" Margin="0,0,8,0" />
+                            <Button Content="选择已有代码库" Command="{Binding OpenLibraryCommand}" Margin="0,0,8,0" />
+                            <Button Content="创建 U 盘代码库" Command="{Binding CreateLibraryCommand}" Margin="0" />
+                        </StackPanel>
+                    </StackPanel>
                     <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="440" Visibility="{Binding ShowWelcome, Converter={StaticResource BoolVisibility}}">
                         <TextBlock Text="你的代码，随身携带" FontSize="28" FontWeight="SemiBold" TextAlignment="Center" />
                         <TextBlock Text="把 U 盘变成离线 Git 中转站。&#10;在不同电脑之间，清楚地推送和拉取。" TextAlignment="Center" Style="{StaticResource MutedText}" Margin="0,18,0,30" FontSize="15" />
-                        <TextBlock Text="01   创建或打开一个 Vault&#10;&#10;02   加入已有 Git 项目&#10;&#10;03   在另一台电脑克隆并继续工作" Style="{StaticResource MutedText}" FontSize="14" />
+                        <TextBlock Text="01   创建或选择 U 盘代码库&#10;&#10;02   把本地 Git 项目加入代码库&#10;&#10;03   在另一台电脑克隆并继续工作" Style="{StaticResource MutedText}" FontSize="14" />
                     </StackPanel>
                     <ScrollViewer VerticalScrollBarVisibility="Auto" Visibility="{Binding HasSelection, Converter={StaticResource BoolVisibility}}">
                         <StackPanel>
                             <TextBlock Text="{Binding DetailTitle}" FontSize="27" FontWeight="SemiBold" />
                             <TextBlock Text="本地工作目录" Style="{StaticResource MutedText}" Margin="0,22,0,4" FontSize="11" />
                             <DockPanel><Button Content="打开目录" Command="{Binding OpenLocalCommand}" DockPanel.Dock="Right" Padding="10,5" Margin="12,0,0,0" /><TextBlock Text="{Binding LocalPath}" TextWrapping="Wrap" VerticalAlignment="Center" /></DockPanel>
-                            <TextBlock Text="U 盘裸仓库" Style="{StaticResource MutedText}" Margin="0,14,0,4" FontSize="11" />
+                            <TextBlock Text="U 盘中的位置" Style="{StaticResource MutedText}" Margin="0,14,0,4" FontSize="11" />
                             <TextBlock Text="{Binding RemotePath}" TextWrapping="Wrap" />
                             <Border Background="#F3F7F6" CornerRadius="8" Padding="18" Margin="0,24,0,18">
                                 <StackPanel>

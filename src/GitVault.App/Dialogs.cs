@@ -77,6 +77,30 @@ public static class Dialogs
         return dialog.ShowDialog(Application.Current.MainWindow) == true ? dialog.FolderName : null;
     }
 
+    /// <summary>展示说明并等待用户确认，取消时返回 false。</summary>
+    public static bool Confirm(string title, string message, string confirmText)
+    {
+        var window = new Window
+        {
+            Title = title, Width = 580, SizeToContent = SizeToContent.Height,
+            ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Owner = Application.Current.MainWindow
+        };
+        var panel = new StackPanel { Margin = new Thickness(26) };
+        panel.Children.Add(new TextBlock { Text = title, FontSize = 20, FontWeight = FontWeights.SemiBold });
+        panel.Children.Add(new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 12, 0, 22) });
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        var cancel = new Button { Content = "取消", IsCancel = true };
+        var confirm = new Button { Content = confirmText, IsDefault = true, Style = (Style)Application.Current.FindResource("PrimaryButton") };
+        confirm.Click += (_, _) => window.DialogResult = true;
+        cancel.Click += (_, _) => window.DialogResult = false;
+        actions.Children.Add(cancel);
+        actions.Children.Add(confirm);
+        panel.Children.Add(actions);
+        window.Content = panel;
+        return window.ShowDialog() == true;
+    }
+
     /// <summary>提供可选择并复制的错误详情。</summary>
     public static void Error(string message)
     {

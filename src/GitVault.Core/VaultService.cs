@@ -9,13 +9,22 @@ public sealed class VaultService
     public VaultLocation Create(string root, string name)
     {
         root = Path.GetFullPath(root);
-        if (string.IsNullOrWhiteSpace(name)) throw new InvalidOperationException("请填写 Vault 名称。");
+        if (string.IsNullOrWhiteSpace(name)) throw new InvalidOperationException("请填写代码库名称。");
         if (Directory.Exists(root) && Directory.EnumerateFileSystemEntries(root).Any())
-            throw new InvalidOperationException("请选择不存在或空的目录创建 Vault。");
+            throw new InvalidOperationException("请选择不存在或空的目录创建代码库。");
         Directory.CreateDirectory(Path.Combine(root, "repos"));
         var manifest = new VaultManifest { Name = name.Trim() };
         SettingsService.WriteJson(Path.Combine(root, "vault.json"), manifest);
         return Open(root);
+    }
+
+    /// <summary>只按目录内容判断类型，不要求用户认识内部配置文件。</summary>
+    public DirectoryKind Probe(string path)
+    {
+        var root = Path.GetFullPath(path);
+        if (File.Exists(Path.Combine(root, "vault.json"))) return DirectoryKind.CodeLibrary;
+        if (Directory.Exists(Path.Combine(root, ".git")) || File.Exists(Path.Combine(root, ".git"))) return DirectoryKind.LocalProject;
+        return Directory.Exists(root) ? DirectoryKind.Plain : DirectoryKind.Missing;
     }
 
     /// <summary>加载清单并验证身份、唯一性及路径边界。</summary>
@@ -23,9 +32,9 @@ public sealed class VaultService
     {
         root = Path.GetFullPath(root);
         var manifest = JsonSerializer.Deserialize<VaultManifest>(File.ReadAllText(Path.Combine(root, "vault.json")), SettingsService.JsonOptions)
-            ?? throw new InvalidDataException("Vault 清单为空。");
+            ?? throw new InvalidDataException("代码库信息为空，请确认选择了正确的目录。");
         if (manifest.SchemaVersion != 1 || manifest.VaultId == Guid.Empty || string.IsNullOrWhiteSpace(manifest.Name) || manifest.Repositories is null)
-            throw new InvalidDataException("Vault 清单格式无效或版本暂不支持。");
+            throw new InvalidDataException("代码库信息格式无效或版本暂不支持。");
         var location = new VaultLocation(root, manifest);
         var ids = new HashSet<Guid>();
         var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -33,7 +42,7 @@ public sealed class VaultService
         {
             if (repository is null || repository.RepoId == Guid.Empty || string.IsNullOrWhiteSpace(repository.Name) || !ids.Add(repository.RepoId)
                 || !paths.Add(RepositoryPath(location, repository)))
-                throw new InvalidDataException("Vault 仓库登记重复或字段无效。");
+                throw new InvalidDataException("代码库中的项目登记有重复或无效条目。");
         }
         return location;
     }
@@ -43,12 +52,12 @@ public sealed class VaultService
     {
         var current = Open(vault.RootPath);
         if (current.Manifest.VaultId != vault.Manifest.VaultId)
-            throw new IOException("此位置已不是原来的 Vault，请重新选择 U 盘。");
+            throw new IOException("此位置已不是原来的代码库，请重新选择 U 盘。");
         var entry = current.Manifest.Repositories.SingleOrDefault(r => r.RepoId == repository.RepoId);
         if (entry is null || entry.RelativePath != repository.RelativePath)
-            throw new IOException("仓库登记已变化，请刷新 Vault。");
+            throw new IOException("项目登记已变化，请刷新。");
         var path = RepositoryPath(current, entry);
-        if (!Directory.Exists(path)) throw new DirectoryNotFoundException("U 盘仓库缺失：" + path);
+        if (!Directory.Exists(path)) throw new DirectoryNotFoundException("U 盘中的代码缺失：" + path);
         return path;
     }
 
@@ -56,15 +65,15 @@ public sealed class VaultService
     public string RepositoryPath(VaultLocation vault, VaultRepository repository)
     {
         if (string.IsNullOrWhiteSpace(repository.RelativePath) || Path.IsPathRooted(repository.RelativePath))
-            throw new InvalidDataException("仓库路径必须是 repos 内的相对路径。");
+            throw new InvalidDataException("项目路径必须是代码库内的相对路径。");
         var parent = Path.GetFullPath(Path.Combine(vault.RootPath, "repos"));
         var path = Path.GetFullPath(Path.Combine(vault.RootPath, repository.RelativePath));
         if (!path.StartsWith(parent + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("仓库路径超出了 repos 目录。");
+            throw new InvalidDataException("项目路径超出了代码库目录。");
         for (var current = new DirectoryInfo(path); current is not null; current = current.Parent)
         {
             if (current.Exists && current.Attributes.HasFlag(FileAttributes.ReparsePoint))
-                throw new InvalidDataException("Vault 仓库路径不能包含目录链接。");
+                throw new InvalidDataException("代码库路径中不能包含目录链接。");
             if (string.Equals(current.FullName, Path.GetFullPath(vault.RootPath), StringComparison.OrdinalIgnoreCase)) break;
         }
         return path;
@@ -74,7 +83,7 @@ public sealed class VaultService
     public VaultLocation Register(VaultLocation vault, VaultRepository repository)
     {
         var current = Open(vault.RootPath);
-        if (current.Manifest.VaultId != vault.Manifest.VaultId) throw new IOException("Vault 身份发生变化。");
+        if (current.Manifest.VaultId != vault.Manifest.VaultId) throw new IOException("代码库身份发生变化。");
         var path = RepositoryPath(current, repository);
         if (current.Manifest.Repositories.Any(r => r.RepoId == repository.RepoId ||
             string.Equals(RepositoryPath(current, r), path, StringComparison.OrdinalIgnoreCase)))

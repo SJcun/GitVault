@@ -46,6 +46,19 @@ public sealed record RepositoryBinding(Guid VaultId, Guid RepoId, string LocalPa
 /// <summary>当前分支与 U 盘同名分支的关系。</summary>
 public enum SyncKind { Synced, Ahead, Behind, Diverged, MissingBranch, Unrelated, Unsupported }
 
+/// <summary>用户选择目录后判断出的类型，用于给出下一步引导而不是报错。</summary>
+public enum DirectoryKind
+{
+    /// <summary>GitVault 创建的 U 盘代码库。</summary>
+    CodeLibrary,
+    /// <summary>普通本地 Git 项目，可加入代码库。</summary>
+    LocalProject,
+    /// <summary>已存在但既非代码库也非 Git 项目。</summary>
+    Plain,
+    /// <summary>目录不存在，可直接创建。</summary>
+    Missing
+}
+
 /// <summary>一次成功检查得到的状态；失败不会构造为已同步。</summary>
 public sealed record RepositoryStatus(
     string Branch, string Head, string? RemoteHead, int Ahead, int Behind,
