@@ -58,6 +58,23 @@ public sealed class VaultServiceTests : IDisposable
         Assert.False(File.Exists(Path.Combine(project, "vault.json")));
     }
 
+    /// <summary>不存在的多级路径自动创建；已有代码库和含文件的目录都受保护。</summary>
+    [Fact]
+    public void CreateMakesMissingDirectoriesAndProtectsExistingContent()
+    {
+        var target = Path.Combine(root, "U 盘", "多层新目录", "GitVault");
+        var library = vaults.Create(target, "测试");
+        Assert.True(Directory.Exists(Path.Combine(library.RootPath, "repos")));
+        Assert.True(File.Exists(Path.Combine(library.RootPath, "vault.json")));
+        var repeat = Assert.Throws<InvalidOperationException>(() => vaults.Create(target, "再建一次"));
+        Assert.Contains("已经是", repeat.Message);
+        var nonEmpty = Path.Combine(root, "非空目录");
+        Directory.CreateDirectory(nonEmpty);
+        File.WriteAllText(Path.Combine(nonEmpty, "keep.txt"), "keep");
+        Assert.Throws<InvalidOperationException>(() => vaults.Create(nonEmpty, "测试"));
+        Assert.Equal("keep", File.ReadAllText(Path.Combine(nonEmpty, "keep.txt")));
+    }
+
     /// <summary>仅清理本测试拥有的目录。</summary>
     public void Dispose()
     {

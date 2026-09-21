@@ -169,23 +169,25 @@ public partial class MainViewModel : ObservableObject
         {
             case DirectoryKind.LocalProject:
                 if (Dialogs.Confirm("检测到本地 Git 项目",
-                    $"这是一个本地 Git 项目：{path}\n如果希望把它保存到 U 盘，请先创建 U 盘代码库，再使用“加入 U 盘代码库”导入。\n要现在创建 U 盘代码库吗？",
-                    "创建 U 盘代码库"))
-                    await CreateLibraryAsync(null);
+                    $"这是一个本地 Git 项目：{path}\n要现在为它创建 U 盘代码库，并把这个项目加入吗？",
+                    "创建并加入"))
+                {
+                    if (await CreateLibraryAtAsync(path)) await ImportAsync(path);
+                }
                 return;
             case DirectoryKind.Plain:
                 if (Dialogs.Confirm("这里还不能打开代码库",
                     Directory.EnumerateFileSystemEntries(path).Any()
-                        ? $"{path}\n这个目录里有其他文件，还不是 U 盘代码库。\n要在这里创建吗？需要先清空，或改用空目录。"
+                        ? $"{path}\n这个目录里有其他文件，还不能直接作为代码库。\n要在这个目录里创建“GitVault”文件夹吗？"
                         : $"{path}\n这个目录是空的。要在这里创建 U 盘代码库吗？",
                     "创建 U 盘代码库"))
-                    await CreateLibraryAsync(path);
+                    await CreateLibraryAtAsync(path);
                 return;
             case DirectoryKind.Missing:
                 if (Dialogs.Confirm("这里还不能打开代码库",
                     $"{path}\n这个目录还不存在。要在这里创建 U 盘代码库吗？",
                     "创建 U 盘代码库"))
-                    await CreateLibraryAsync(path);
+                    await CreateLibraryAtAsync(path);
                 return;
             default:
                 await ExecuteAsync("打开代码库", token => LoadVaultAsync(vaults.Open(path), token));
@@ -193,17 +195,54 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    /// <summary>在空目录中创建代码库。</summary>
+    /// <summary>创建代码库：父目录加新文件夹名，目录不存在时自动创建。</summary>
     [RelayCommand(CanExecute = nameof(CanWork))]
-    private Task CreateLibraryAsync() => CreateLibraryAsync(null);
+    private Task CreateLibraryAsync() => CreateLibraryAtAsync(null);
 
-    /// <summary>创建代码库，支持按用户已选目录预填位置。</summary>
-    private async Task CreateLibraryAsync(string? suggestedPath)
+    /// <summary>创建代码库，支持按用户已选目录预填名称、父目录和文件夹名；返回是否创建成功。</summary>
+    private async Task<bool> CreateLibraryAtAsync(string? suggestedPath)
     {
-        var input = Dialogs.Ask("创建 U 盘代码库", "在 U 盘上选择空目录，或输入新的目录路径。一个代码库可以存放多个项目，随 U 盘带走。",
-            new InputField("代码库名称", "我的代码库"), new InputField("代码库目录", suggestedPath ?? "", "folder"));
-        if (input is null) return;
-        await ExecuteAsync("创建代码库", token => LoadVaultAsync(vaults.Create(input[1], input[0]), token));
+        var name = "我的代码库";
+        var parent = "";
+        var folder = "GitVault";
+        if (suggestedPath is not null)
+        {
+            var full = Path.GetFullPath(suggestedPath);
+            var trimmed = full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var leaf = Dialogs.FolderNameOf(full);
+            if (leaf.Length == 0) leaf = "GitVault";
+            if (vaults.Probe(full) == DirectoryKind.LocalProject)
+            {
+                // 本地 Git 项目：代码库名称和文件夹名都取项目目录名，父目录由用户选择 U 盘。
+                name = leaf;
+                folder = leaf;
+            }
+            else if (Path.GetPathRoot(full) is { } root && string.Equals(root, full, StringComparison.OrdinalIgnoreCase))
+                parent = full;
+            else if (Directory.Exists(full) && Directory.EnumerateFileSystemEntries(full).Any())
+                parent = trimmed;
+            else if (Path.GetDirectoryName(trimmed) is { Length: > 0 } head)
+            {
+                parent = head;
+                name = leaf;
+                folder = leaf;
+            }
+            else parent = trimmed;
+        }
+        var input = Dialogs.Ask("创建 U 盘代码库", "选择父目录并输入新文件夹名，程序会自动创建。一个代码库可以存放多个项目，随 U 盘带走。",
+            new InputField("代码库名称", name, Hint: "显示在程序顶部的名称，可自行取名。"),
+            new InputField("父目录", parent, "folder", Hint: "选择 U 盘盘符或其中的文件夹，代码库会建在它下面。"),
+            new InputField("新文件夹名称", folder, MirrorFrom: 0, Hint: "父目录下会自动创建这个文件夹，用来存放代码库；在另一台电脑上通过它找到 U 盘上的代码库。"));
+        if (input is null) return false;
+        var created = false;
+        await ExecuteAsync("创建代码库", async token =>
+        {
+            if (input[2].IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || input[2] is "." or "..")
+                throw new InvalidOperationException("请输入单个文件夹名称。");
+            await LoadVaultAsync(vaults.Create(Path.Combine(input[1], input[2]), input[0]), token);
+            created = true;
+        });
+        return created;
     }
 
     /// <summary>加载清单并恢复本机路径。</summary>
@@ -236,10 +275,15 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>将已有工作区导入 U 盘。</summary>
     [RelayCommand(CanExecute = nameof(CanUseVault))]
-    private async Task ImportAsync()
+    private Task ImportAsync() => ImportAsync(null);
+
+    /// <summary>导入本地项目，支持从所选目录预填路径并派生默认名称。</summary>
+    private async Task ImportAsync(string? suggestedLocalPath)
     {
         var input = Dialogs.Ask("加入 U 盘代码库", "把本地 Git 项目已提交的内容复制到 U 盘。不会修改本地仓库的现有 remote。",
-            new InputField("本地 Git 工作区根目录", "", "folder"), new InputField("在代码库中的名称"));
+            new InputField("本地 Git 工作区根目录", suggestedLocalPath ?? "", "folder"),
+            new InputField("在代码库中的名称", suggestedLocalPath is null ? "" : Dialogs.FolderNameOf(suggestedLocalPath),
+                MirrorFrom: 0, MirrorFileName: true, Hint: "项目在代码库列表中的显示名称。"));
         if (input is null) return;
         await ExecuteAsync("加入代码库", async token =>
         {

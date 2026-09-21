@@ -1,15 +1,24 @@
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
 
 namespace GitVault.App;
 
-/// <summary>表单字段，可选目录或程序选择器。</summary>
-public sealed record InputField(string Label, string Value = "", string? Picker = null);
+/// <summary>表单字段，可选目录或程序选择器、说明文字，或从另一个字段派生内容。</summary>
+public sealed record InputField(string Label, string Value = "", string? Picker = null, string? Hint = null,
+    int MirrorFrom = -1, bool MirrorFileName = false);
 
 /// <summary>集中处理简单输入对话框，避免为一次性表单引入框架。</summary>
 public static class Dialogs
 {
+    /// <summary>取路径的文件夹名，用于把所选项目目录变成默认名称。</summary>
+    public static string FolderNameOf(string path)
+    {
+        var trimmed = path.Trim().TrimEnd('\\', '/');
+        return Path.GetFileName(trimmed);
+    }
+
     /// <summary>显示模态表单，取消时不返回输入。</summary>
     public static string[]? Ask(string title, string description, params InputField[] fields)
     {
@@ -26,7 +35,7 @@ public static class Dialogs
         foreach (var field in fields)
         {
             panel.Children.Add(new TextBlock { Text = field.Label, Margin = new Thickness(0, 0, 0, 6) });
-            var row = new DockPanel { Margin = new Thickness(0, 0, 0, 16) };
+            var row = new DockPanel { Margin = new Thickness(0, 0, 0, field.Hint is null ? 16 : 4) };
             var input = new TextBox { Text = field.Value, MinWidth = 200 };
             System.Windows.Automation.AutomationProperties.SetName(input, field.Label);
             if (field.Picker is not null)
@@ -50,8 +59,15 @@ public static class Dialogs
             }
             row.Children.Add(input);
             panel.Children.Add(row);
+            if (field.Hint is not null)
+                panel.Children.Add(new TextBlock
+                {
+                    Text = field.Hint, Foreground = (System.Windows.Media.Brush)Application.Current.FindResource("Muted"),
+                    FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 14)
+                });
             inputs.Add(input);
         }
+        WireMirrors(fields, inputs);
         var error = new TextBlock { Foreground = System.Windows.Media.Brushes.Firebrick, TextWrapping = TextWrapping.Wrap };
         panel.Children.Add(error);
         var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0) };
@@ -68,6 +84,28 @@ public static class Dialogs
         window.Content = panel;
         window.Loaded += (_, _) => inputs.FirstOrDefault()?.Focus();
         return window.ShowDialog() == true ? inputs.Select(input => input.Text.Trim()).ToArray() : null;
+    }
+
+    /// <summary>源字段变化时同步派生字段；用户手动改过派生字段后不再覆盖。</summary>
+    private static void WireMirrors(InputField[] fields, List<TextBox> inputs)
+    {
+        for (var target = 0; target < fields.Length; target++)
+        {
+            var field = fields[target];
+            if (field.MirrorFrom < 0 || field.MirrorFrom >= inputs.Count) continue;
+            var source = inputs[field.MirrorFrom];
+            var mirror = inputs[target];
+            var edited = false;
+            var syncing = false;
+            mirror.TextChanged += (_, _) => { if (!syncing) edited = true; };
+            source.TextChanged += (_, _) =>
+            {
+                if (edited || string.IsNullOrWhiteSpace(source.Text)) return;
+                syncing = true;
+                mirror.Text = field.MirrorFileName ? FolderNameOf(source.Text) : source.Text.Trim();
+                syncing = false;
+            };
+        }
     }
 
     /// <summary>打开一个目录供用户选择。</summary>

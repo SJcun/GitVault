@@ -5,11 +5,13 @@ namespace GitVault.Core;
 /// <summary>创建、识别并校验移动磁盘上的 Vault 清单。</summary>
 public sealed class VaultService
 {
-    /// <summary>只在空目录中创建 Vault，不占用已有项目目录。</summary>
+    /// <summary>只在空目录中创建 Vault，不占用已有项目目录；目录不存在时自动创建。</summary>
     public VaultLocation Create(string root, string name)
     {
         root = Path.GetFullPath(root);
         if (string.IsNullOrWhiteSpace(name)) throw new InvalidOperationException("请填写代码库名称。");
+        if (File.Exists(Path.Combine(root, "vault.json")))
+            throw new InvalidOperationException("此目录已经是 U 盘代码库，请改用“选择已有代码库”打开。");
         if (Directory.Exists(root) && Directory.EnumerateFileSystemEntries(root).Any())
             throw new InvalidOperationException("请选择不存在或空的目录创建代码库。");
         Directory.CreateDirectory(Path.Combine(root, "repos"));
