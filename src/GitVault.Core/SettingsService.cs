@@ -1,4 +1,6 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Unicode;
 
 namespace GitVault.Core;
 
@@ -24,8 +26,13 @@ public sealed class SettingsService(string? directory = null)
     /// <summary>保存本机设置。</summary>
     public void Save(AppSettings settings) => WriteJson(Path.Combine(DirectoryPath, "settings.json"), settings);
 
-    /// <summary>共同使用的可读 JSON 格式。</summary>
-    internal static JsonSerializerOptions JsonOptions { get; } = new() { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    /// <summary>共同使用的可读 JSON 格式，直接保留中文等 Unicode 文字，必要的 JSON 字符仍会转义。</summary>
+    internal static JsonSerializerOptions JsonOptions { get; } = new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
+    };
 
     /// <summary>先完整写入临时文件，再替换目标；异常时保留原文件。</summary>
     internal static void WriteJson<T>(string path, T value)

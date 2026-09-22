@@ -1,4 +1,4 @@
-param(
+﻿param(
     [ValidateSet('Build', 'Test', 'Publish')]
     [string]$Task = 'Build'
 )
@@ -18,7 +18,7 @@ try {
             dotnet build GitVault.sln -c Release --nologo
         }
         'Test' {
-            dotnet test tests/GitVault.Core.Tests/GitVault.Core.Tests.csproj -c Release --logger 'trx;LogFileName=core.trx' --results-directory artifacts/TestResults
+            dotnet test GitVault.sln -c Release --logger trx --results-directory artifacts/TestResults
         }
         'Publish' {
             $publishPath = Join-Path $projectRoot 'artifacts\publish\GitVault-win-x64'
