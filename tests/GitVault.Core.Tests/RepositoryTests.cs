@@ -151,6 +151,26 @@ public sealed class RepositoryTests : IDisposable
         Assert.Contains("浅克隆", (await repositories.RefreshAsync(vault, repository, shallow)).Message);
     }
 
+    /// <summary>绑定选错目录时给出可执行的说明，而不是 Git 的原始报错。</summary>
+    [Fact]
+    public async Task BindingUnhelpfulDirectoryExplainsWhatToSelect()
+    {
+        var (a, vault, repository) = await SeedAsync();
+        // 换一台电脑后用户容易误选代码库根目录或其中的裸仓库目录。
+        var wrong = await Assert.ThrowsAsync<InvalidOperationException>(() => repositories.BindAsync(vault, repository, vault.RootPath));
+        Assert.Contains("不是 Git 工作区", wrong.Message);
+        Assert.Contains("克隆到本机", wrong.Message);
+        var bare = await Assert.ThrowsAsync<InvalidOperationException>(() => repositories.BindAsync(vault, repository, vaults.RepositoryPath(vault, repository)));
+        Assert.Contains("裸仓库", bare.Message);
+        // 普通目录既不是仓库也不是其子目录，同样要给出说明。
+        var plain = Path.Combine(root, "普通目录");
+        Directory.CreateDirectory(plain);
+        var none = await Assert.ThrowsAsync<InvalidOperationException>(() => repositories.BindAsync(vault, repository, plain));
+        Assert.Contains("不是 Git 工作区", none.Message);
+        // 真正的本地工作区仍能正常绑定。
+        await repositories.BindAsync(vault, repository, a);
+    }
+
     /// <summary>不静默忽略 LFS 与子模块内容。</summary>
     [Fact]
     public async Task LfsAndSubmoduleAreNotReportedAsFullyTransferred()

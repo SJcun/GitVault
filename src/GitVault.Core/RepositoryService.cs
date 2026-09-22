@@ -160,9 +160,23 @@ public sealed class RepositoryService(GitCommandService git, VaultService vaults
     /// <summary>获取工作区快照，优先使用 Git 自身定位路径，兼容 .git 文件。</summary>
     private async Task<LocalSnapshot> InspectLocalAsync(string path, CancellationToken token)
     {
-        if (!Directory.Exists(path)) throw new DirectoryNotFoundException("本地工作目录不存在：" + path);
-        var root = (await git.RunAsync(path, ["rev-parse", "--show-toplevel"], token)).Output.Trim();
-        if (!string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(root)), Path.TrimEndingDirectorySeparator(Path.GetFullPath(path)), StringComparison.OrdinalIgnoreCase))
+        var selected = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        if (!Directory.Exists(selected)) throw new DirectoryNotFoundException("本地工作目录不存在：" + path);
+        // 代码库根目录与其中的裸仓库都不含工作区；先按目录特征给出针对性说明，而不是只抛 Git 的原始报错。
+        if (File.Exists(Path.Combine(selected, "vault.json")))
+            throw new InvalidOperationException("选中的是 U 盘代码库根目录（内含 vault.json 和 repos），它本身不是 Git 工作区。"
+                + "\n请选择本机上已有的 Git 项目根目录；本机还没有工作目录时，请点击“克隆到本机”。");
+        if (Directory.Exists(Path.Combine(selected, "objects")) && Directory.Exists(Path.Combine(selected, "refs"))
+            && string.Equals((await git.RunAsync(selected, ["rev-parse", "--is-bare-repository"], token, check: false)).Output.Trim(),
+                "true", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("选中的是 U 盘代码库中的裸仓库目录，它没有工作区。"
+                + "\n请点击“克隆到本机”把它克隆到本机；已经有本地工作目录时，请选择那个目录，而不是 U 盘里的目录。");
+        var locate = await git.RunAsync(path, ["rev-parse", "--show-toplevel"], token, check: false);
+        if (locate.ExitCode != 0)
+            throw new InvalidOperationException("选中的目录不是 Git 工作区，也不是工作区的子目录：" + selected
+                + "\n请选择本机上已有的 Git 项目根目录；还没有工作目录时，请点击“克隆到本机”。");
+        var root = locate.Output.Trim();
+        if (!string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(root)), selected, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("请选择 Git 工作区根目录：" + root);
         var branchResult = await git.RunAsync(path, ["symbolic-ref", "--quiet", "--short", "HEAD"], token, check: false);
         var branch = branchResult.Output.Trim();
