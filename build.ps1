@@ -21,12 +21,12 @@ try {
             dotnet test GitVault.sln -c Release --logger trx --results-directory artifacts/TestResults
         }
         'Publish' {
-            $publishPath = Join-Path $projectRoot 'artifacts\publish\GitVault-win-x64'
+            # 每次发布使用全新目录，避免把旧包中的内部文档或其他残留文件打包。
+            $publishPath = Join-Path $projectRoot ('artifacts\publish\' + [Guid]::NewGuid().ToString('N') + '\GitVault-win-x64')
             dotnet publish src/GitVault.App/GitVault.App.csproj -c Release -r win-x64 --self-contained true -o $publishPath --nologo
             if ($LASTEXITCODE -ne 0) { throw '发布失败。' }
             Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md') -Destination $publishPath
-            Copy-Item -LiteralPath (Join-Path $projectRoot 'docs') -Destination $publishPath -Recurse -Force
-            Copy-Item -LiteralPath (Join-Path $projectRoot 'docs\使用说明书.html') -Destination (Join-Path $publishPath '使用说明书.html')
+            Copy-Item -LiteralPath (Join-Path $projectRoot 'LICENSE') -Destination $publishPath
             # 随可执行文件保留 MVVM 依赖的许可与第三方声明。
             $toolkitPath = Join-Path $env:NUGET_PACKAGES 'communitytoolkit.mvvm\8.4.0'
             Copy-Item -LiteralPath (Join-Path $toolkitPath 'License.md') -Destination (Join-Path $publishPath 'CommunityToolkit.License.md')

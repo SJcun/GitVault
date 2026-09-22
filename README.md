@@ -11,7 +11,7 @@ GitVault 是基于 **.NET 8 + WPF** 的桌面工具，将 U 盘上的标准 Git 
 
 适合需要在多台 Windows 电脑之间携带项目、通过移动存储设备离线传递提交的个人开发流程。
 
-[使用说明书](docs/使用说明书.md) · [设计方案](docs/GitVault-V1-方案.md) · [验证说明](docs/验证说明.md)
+[下载发布包](https://github.com/SJcun/GitVault/releases/latest)
 
 ## 功能
 
@@ -39,7 +39,7 @@ GitVault 是基于 **.NET 8 + WPF** 的桌面工具，将 U 盘上的标准 Git 
 
 取得 `GitVault-win-x64.zip` 后，完整解压并运行 `GitVault.exe`。请保留同目录下的 DLL 和其他文件，不要只复制 EXE。
 
-如果还没有发布包，可按下文“从源码构建”自行生成。发布包内附有可双击打开的 `使用说明书.html`。
+如果还没有发布包，可按下文“从源码构建”自行生成。使用方式见本页的快速开始与故障排查。
 
 首次启动若提示找不到 Git，打开“设置”，选择本机的 `git.exe`，或在 Git 已加入 PATH 时保留默认值 `git`。
 
@@ -123,7 +123,7 @@ GitVault 针对 FAT32 / exFAT 等介质上的 Git 所有权检查，为每次 Gi
 
 如果日志出现 `safe.directory ... not absolute`，检查已有全局配置是否包含多余引号等字符。外部 Git 工具不会自动继承 GitVault 的临时配置。
 
-程序不自动删除 Git 锁文件。突然拔盘、磁盘损坏或断电不保证能自动恢复，U 盘中转也不能替代独立备份。更多问题见[使用说明书](docs/使用说明书.md)。
+程序不自动删除 Git 锁文件。突然拔盘、磁盘损坏或断电不保证能自动恢复，U 盘中转也不能替代独立备份。
 
 ## 从源码构建
 
@@ -150,12 +150,12 @@ dotnet run --project src/GitVault.App/GitVault.App.csproj
 
 | 输出 | 路径 |
 | --- | --- |
-| 发布目录 | `artifacts/publish/GitVault-win-x64/` |
+| 发布目录 | `artifacts/publish/<本次构建标识>/GitVault-win-x64/` |
 | 发布压缩包 | `artifacts/GitVault-win-x64.zip` |
 | 测试结果 | `artifacts/TestResults/` |
 | 构建脚本使用的 NuGet 缓存 | `artifacts/nuget/` |
 
-发布脚本会一并打包 README、使用说明和第三方依赖声明。
+发布脚本会一并打包 README、项目许可证和第三方依赖声明。
 
 ## 项目结构
 
@@ -167,7 +167,6 @@ src/
 tests/
 ├── GitVault.Core.Tests/     基于真实临时 Git 仓库的核心测试
 └── GitVault.App.Tests/      WPF 对话框交互回归测试
-docs/                       使用说明、设计方案与验证记录
 tools/Export-AppIcon.ps1     图标导出脚本
 build.ps1                   构建、测试与发布入口
 global.json                 .NET SDK 选择配置
@@ -175,7 +174,7 @@ global.json                 .NET SDK 选择配置
 
 主要技术：C#、.NET 8、WPF、CommunityToolkit.Mvvm、Git CLI 和 xUnit。
 
-测试覆盖双向提交传输、分叉与工作区保护、已有 remote 保留、盘符对应路径变化、缓存引用清理、推送失败、仓库列表恢复及对话框交互等场景。核心测试使用临时真实 Git 仓库模拟两台电脑与 U 盘，不修改用户全局 Git 配置。已有验证结果和尚需实机验证的范围见[验证说明](docs/验证说明.md)。
+测试覆盖双向提交传输、分叉与工作区保护、已有 remote 保留、盘符对应路径变化、缓存引用清理、推送失败、仓库列表恢复及对话框交互等场景。核心测试使用临时真实 Git 仓库模拟两台电脑与 U 盘，不修改用户全局 Git 配置。真实设备的插拔、写满、断电等情形仍需实机验证。
 
 Logo 与界面图标定义在 `src/GitVault.App/Assets/Icons.xaml`。修改 Logo 后，可在 Windows 下重新生成多尺寸 ICO 和预览 PNG，再构建或发布：
 
