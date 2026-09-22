@@ -99,6 +99,12 @@ GitVault 为每次 Git 调用生成独立的临时全局配置，通过 `GIT_CON
 
 发布输出：`artifacts/publish/GitVault-win-x64/`，压缩包：`artifacts/GitVault-win-x64.zip`。
 
+Logo 与界面图标使用 `src/GitVault.App/Assets/Icons.xaml` 中的 WPF 矢量资源。修改 Logo 后，在 Windows 下运行以下命令，重新生成程序使用的多尺寸 ICO 和预览 PNG，再构建或发布：
+
+```powershell
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File tools/Export-AppIcon.ps1
+```
+
 测试使用临时真实 Git 仓库模拟两台电脑与 U 盘，验证双向提交传输、分叉、工作区保护、已有 remote 保留、路径变化、缓存清理、推送失败及列表恢复。测试不会更改用户全局 Git 配置。
 
 详细设计见 [V1 方案](docs/GitVault-V1-方案.md)，验证记录见 [验证说明](docs/验证说明.md)。

@@ -16,15 +16,12 @@ public partial class RepositoryItem(VaultRepository repository, string? localPat
     [ObservableProperty] private RepositoryStatus? status;
     /// <summary>状态摘要，错误时不沿用旧的同步结论。</summary>
     [ObservableProperty] private string summary = localPath is null ? "本机未绑定" : "等待刷新";
-    /// <summary>辅助图标，始终同时显示文字。</summary>
-    [ObservableProperty] private string symbol = "○";
 
     /// <summary>更新状态和列表中的文本。</summary>
     public void Apply(RepositoryStatus value)
     {
         Status = value;
         Summary = $"{value.Branch} · {value.Message}";
-        Symbol = value.Kind switch { SyncKind.Synced => "●", SyncKind.Ahead => "↑", SyncKind.Behind => "↓", _ => "!" };
     }
 
     /// <summary>使缓存失效，防止失败后继续显示已同步。</summary>
@@ -32,6 +29,5 @@ public partial class RepositoryItem(VaultRepository repository, string? localPat
     {
         Status = null;
         Summary = reason;
-        Symbol = "!";
     }
 }

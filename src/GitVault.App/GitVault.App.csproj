@@ -8,8 +8,11 @@
     <AssemblyName>GitVault</AssemblyName>
     <Version>1.0.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets/GitVault.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
+    <Resource Include="Assets/GitVault.ico" />
+    <Resource Include="Assets/GitVault.png" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
     <ProjectReference Include="../GitVault.Core/GitVault.Core.csproj" />
   </ItemGroup>

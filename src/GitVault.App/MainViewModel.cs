@@ -109,9 +109,9 @@ public partial class MainViewModel : ObservableObject
         _ => "每次操作只同步当前分支。提交代码和切换分支请使用现有 Git 工具。"
     };
     /// <summary>设备连接说明。</summary>
-    public string ConnectionText => IsOnline ? "● 已连接" : "○ 未连接";
+    public string ConnectionText => IsOnline ? "已连接" : "未连接";
     /// <summary>推送按钮在新分支状态下明确说明创建行为。</summary>
-    public string PushLabel => SelectedItem?.Status?.Kind == SyncKind.MissingBranch ? "↑ 在 U 盘创建此分支" : "↑ 推送到 U 盘";
+    public string PushLabel => SelectedItem?.Status?.Kind == SyncKind.MissingBranch ? "在 U 盘创建此分支" : "推送到 U 盘";
 
     /// <summary>启动时加载设置并发现设备；Git 缺失仍可进入设置修正路径。</summary>
     public async Task InitializeAsync()

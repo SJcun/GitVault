@@ -3,11 +3,16 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
+        <ResourceDictionary>
+        <ResourceDictionary.MergedDictionaries>
+            <ResourceDictionary Source="Assets/Icons.xaml" />
+        </ResourceDictionary.MergedDictionaries>
         <SolidColorBrush x:Key="Ink" Color="#172B3A" />
         <SolidColorBrush x:Key="Muted" Color="#637584" />
         <SolidColorBrush x:Key="Accent" Color="#12685C" />
         <BooleanToVisibilityConverter x:Key="BoolVisibility" />
         <Style TargetType="Window">
+            <Setter Property="Icon" Value="/GitVault;component/Assets/GitVault.ico" />
             <Setter Property="FontFamily" Value="Microsoft YaHei UI, Segoe UI" />
             <Setter Property="FontSize" Value="13" />
             <Setter Property="Foreground" Value="{StaticResource Ink}" />
@@ -25,9 +30,18 @@
                     <ControlTemplate TargetType="Button">
                         <Border x:Name="Chrome" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
                                 BorderThickness="1" CornerRadius="6" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
+                            <!-- Tag 指定操作图形，线条跟随前景色，主按钮自动显示白色图标。 -->
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <Viewbox x:Name="ButtonIcon" Width="16" Height="16" Margin="0,0,7,0" VerticalAlignment="Center" IsHitTestVisible="False">
+                                    <Canvas Width="24" Height="24">
+                                        <Path Data="{TemplateBinding Tag}" Style="{StaticResource IconPath}" Stroke="{TemplateBinding Foreground}" />
+                                    </Canvas>
+                                </Viewbox>
+                                <ContentPresenter VerticalAlignment="Center" />
+                            </StackPanel>
                         </Border>
                         <ControlTemplate.Triggers>
+                            <Trigger Property="Tag" Value="{x:Null}"><Setter TargetName="ButtonIcon" Property="Visibility" Value="Collapsed" /></Trigger>
                             <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Chrome" Property="Opacity" Value="0.8" /></Trigger>
                             <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Chrome" Property="Opacity" Value="0.38" /></Trigger>
                             <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Chrome" Property="BorderBrush" Value="#C98A25" /><Setter TargetName="Chrome" Property="BorderThickness" Value="2" /></Trigger>
@@ -50,5 +64,6 @@
             <Setter Property="Foreground" Value="{StaticResource Muted}" />
             <Setter Property="TextWrapping" Value="Wrap" />
         </Style>
+        </ResourceDictionary>
     </Application.Resources>
 </Application>
