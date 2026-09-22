@@ -67,6 +67,19 @@ U盘/GitVault/
 - 突然拔盘、磁盘损坏和断电不能保证自动恢复；U 盘中转也不等同于独立备份。
 - 程序自身不连接托管平台。仓库自定义的 Git hooks、过滤器仍由本机 Git 执行，其外部依赖需用户自行管理。
 
+## U 盘格式与 git 权限
+
+FAT32 / exFAT 是 U 盘最常见的格式，但它们**不记录文件属主**。git 2.35.2 起会把「读不到属主」直接判为可疑所有权（dubious ownership）并拒绝操作，报错形如：
+
+```text
+fatal: detected dubious ownership in repository at 'F:/GitVault/repos/MyTool.git'
+'F:/GitVault/repos/MyTool.git' is on a file system that does not record ownership
+```
+
+GitVault 在每次调用 git 时自行传入 `-c safe.directory=*`，因此**不需要**改动你的全局 Git 配置；U 盘换到另一台电脑、另一个用户名下也一样能用。
+
+注意：在 FAT32 / exFAT 上，把该目录手工加进 `safe.directory`（git 报错提示的建议）**并不能解决**，因为文件系统无法记录属主，具体路径会一律被判为可疑——只有 `*` 有效。同理，不要按提示去执行 `git config --global --add safe.directory <路径>`。你自己在 Git 工具里操作 U 盘上的裸仓库时若看到同样的报错，需要自行配置 `safe.directory`，这与 GitVault 无关。
+
 ## 开发与验证
 
 安装 .NET 8 SDK 和 Git，项目通过 `global.json` 使用 8.0.4xx SDK 的最新补丁版本。首次构建需要访问 NuGet。
