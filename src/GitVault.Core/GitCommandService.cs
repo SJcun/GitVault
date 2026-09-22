@@ -30,57 +30,82 @@ public sealed class GitCommandService
             start.ArgumentList.Add(directory);
         }
         // -C 是全局选项，必须排在任何子命令之前，否则会被当成子命令参数。
-        ApplySafeDirectory(start, directory);
-        foreach (var arg in args) start.ArgumentList.Add(arg);
-        start.Environment["GIT_TERMINAL_PROMPT"] = "0";
-        start.Environment["GCM_INTERACTIVE"] = "Never";
-        start.Environment["GIT_EDITOR"] = "false";
-        start.Environment["GIT_SEQUENCE_EDITOR"] = "false";
-        var command = $"git {string.Join(' ', start.ArgumentList.Select(a => '\"' + a + '\"'))}";
-        Log?.Invoke(command);
-        using var process = new Process { StartInfo = start };
-        process.Start();
-        var outputTask = process.StandardOutput.ReadToEndAsync();
-        var errorTask = ReadErrorsAsync(process.StandardError);
+        var protectedConfig = ApplySafeDirectory(start, directory, args);
         try
         {
-            await process.WaitForExitAsync(cancellationToken);
+            foreach (var arg in args) start.ArgumentList.Add(arg);
+            start.Environment["GIT_TERMINAL_PROMPT"] = "0";
+            start.Environment["GCM_INTERACTIVE"] = "Never";
+            start.Environment["GIT_EDITOR"] = "false";
+            start.Environment["GIT_SEQUENCE_EDITOR"] = "false";
+            var command = $"git {string.Join(' ', start.ArgumentList.Select(a => '\"' + a + '\"'))}";
+            Log?.Invoke(command);
+            using var process = new Process { StartInfo = start };
+            process.Start();
+            var outputTask = process.StandardOutput.ReadToEndAsync();
+            var errorTask = ReadErrorsAsync(process.StandardError);
+            try
+            {
+                await process.WaitForExitAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                // 取消不能视为回滚：先终止 Git 及子进程，调用方随后重新检查仓库。
+                try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+                catch (InvalidOperationException) { }
+                await process.WaitForExitAsync(CancellationToken.None);
+                await Task.WhenAll(outputTask, errorTask);
+                throw;
+            }
+            var result = new GitResult(process.ExitCode, await outputTask, await errorTask);
+            if (check && result.ExitCode != 0) throw new GitException(command, result);
+            return result;
         }
-        catch (OperationCanceledException)
+        finally
         {
-            // 取消不能视为回滚：先终止 Git 及子进程，调用方随后重新检查仓库。
-            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
-            catch (InvalidOperationException) { }
-            await process.WaitForExitAsync(CancellationToken.None);
-            await Task.WhenAll(outputTask, errorTask);
-            throw;
+            File.Delete(protectedConfig);
         }
-        var result = new GitResult(process.ExitCode, await outputTask, await errorTask);
-        if (check && result.ExitCode != 0) throw new GitException(command, result);
-        return result;
     }
 
-    /// <summary>抑制 Git 的 dubious ownership 检查；不改动用户全局配置。</summary>
-    private static void ApplySafeDirectory(ProcessStartInfo start, string? directory)
+    /// <summary>为本次命令及本地传输子进程提供临时全局配置，结束后自动删除。</summary>
+    private static string ApplySafeDirectory(ProcessStartInfo start, string? directory, string[] arguments)
     {
-        // safe.directory 只影响 Git 的所有者校验，不改变传输、引用或工作区数据。
-        // 必须用环境变量而不是命令行 -c：git 会把 -c 转成 GIT_CONFIG_COUNT 传给子进程，
-        // 但传之前会过滤 safe.directory，导致 push/fetch 派生的 receive-pack、upload-pack
-        // 仍按可疑所有权拒绝 FAT32 上的裸仓库。环境变量由子进程原样继承。
-        var values = new List<string> { "*" };
-        if (!string.IsNullOrWhiteSpace(directory))
+        // 本地传输会清除 GIT_CONFIG_COUNT / GIT_CONFIG_PARAMETERS，但保留 GIT_CONFIG_GLOBAL。
+        // 只信任本次命令明确传入的绝对路径，不能用 * 关闭所有仓库的所有权检查。
+        var directories = arguments.Where(Path.IsPathFullyQualified).ToList();
+        if (directory is not null) directories.Add(Path.GetFullPath(directory));
+        var content = new StringBuilder();
+        start.Environment.TryGetValue("GIT_CONFIG_GLOBAL", out var originalGlobal);
+        if (originalGlobal is not null)
         {
-            // 目录形式与仓库形式各写一份，覆盖 Git 两种匹配路径。
-            var full = Path.GetFullPath(directory);
-            values.Add(full);
-            values.Add(Path.Combine(full, ".git"));
+            AppendConfigValue(content, "include", "path", originalGlobal);
         }
-        start.Environment["GIT_CONFIG_COUNT"] = values.Count.ToString();
-        for (var i = 0; i < values.Count; i++)
+        else
         {
-            start.Environment[$"GIT_CONFIG_KEY_{i}"] = "safe.directory";
-            start.Environment[$"GIT_CONFIG_VALUE_{i}"] = values[i];
+            // 让 Git 自己展开 ~，保留原来的 XDG、用户配置顺序及条件 include 语义。
+            start.Environment.TryGetValue("XDG_CONFIG_HOME", out var xdg);
+            AppendConfigValue(content, "include", "path", string.IsNullOrEmpty(xdg)
+                ? "~/.config/git/config" : Path.Combine(xdg, "git", "config"));
+            AppendConfigValue(content, "include", "path", "~/.gitconfig");
         }
+        foreach (var path in directories.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            AppendConfigValue(content, "safe", "directory", Path.GetFullPath(path));
+            AppendConfigValue(content, "safe", "directory", Path.Combine(Path.GetFullPath(path), ".git"));
+        }
+        var temporary = Path.Combine(Path.GetTempPath(), $"gitvault-{Guid.NewGuid():N}.gitconfig");
+        // 每次调用独占文件，写完关闭句柄后再让 Git 读取，避免 Windows 文件共享冲突。
+        File.WriteAllText(temporary, content.ToString(), new UTF8Encoding(false));
+        start.Environment["GIT_CONFIG_GLOBAL"] = temporary;
+        return temporary;
+    }
+
+    /// <summary>转义配置中的路径，防止空格、注释符和反斜杠改变配置含义。</summary>
+    private static void AppendConfigValue(StringBuilder content, string section, string key, string value)
+    {
+        var escaped = value.Replace('\\', '/').Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\t", "\\t");
+        content.Append('[').Append(section).Append("]\n\t").Append(key).Append(" = \"")
+            .Append(escaped).Append("\"\n");
     }
 
     /// <summary>持续转发 Git 进度，保留完整错误信息用于诊断。</summary>
