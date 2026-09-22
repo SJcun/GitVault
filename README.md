@@ -81,7 +81,7 @@ fatal: detected dubious ownership in repository at 'F:/GitVault/repos/MyTool.git
 'F:/GitVault/repos/MyTool.git' is on a file system that does not record ownership
 ```
 
-GitVault 在每次调用 git 时自行传入 `-c safe.directory=*`，因此**不需要**改动你的全局 Git 配置；U 盘换到另一台电脑、另一个用户名下也一样能用。
+GitVault 在每次调用 git 时自行注入 `safe.directory` 配置，因此**不需要**改动你的全局 Git 配置；U 盘换到另一台电脑、另一个用户名下也一样能用。注入必须走环境变量而不是命令行 `-c`：git 把 `-c` 转给对端子进程时会过滤该键，导致推送和抓取在 U 盘一侧被拒绝。
 
 注意：在 FAT32 / exFAT 上，把该目录手工加进 `safe.directory`（git 报错提示的建议）**并不能解决**，因为文件系统无法记录属主，具体路径会一律被判为可疑——只有 `*` 有效。同理，不要按提示去执行 `git config --global --add safe.directory <路径>`。你自己在 Git 工具里操作 U 盘上的裸仓库时若看到同样的报错，需要自行配置 `safe.directory`，这与 GitVault 无关。
 

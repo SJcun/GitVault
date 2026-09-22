@@ -151,6 +151,29 @@ public sealed class RepositoryTests : IDisposable
         Assert.Contains("浅克隆", (await repositories.RefreshAsync(vault, repository, shallow)).Message);
     }
 
+    /// <summary>safe.directory 必须经环境变量注入，子进程（receive-pack/upload-pack）才能继承。</summary>
+    [Fact]
+    public async Task SafeDirectoryIsPassedThroughEnvironmentForSubprocesses()
+    {
+        // 批处理实现，因此不能放在带 & $ ` 的测试根目录下（cmd 会解析这些字符）。
+        var probeRoot = Path.Combine(Path.GetTempPath(), "GitVaultProbe");
+        Directory.CreateDirectory(probeRoot);
+        var recorder = Path.Combine(probeRoot, "recorder.cmd");
+        await File.WriteAllTextAsync(recorder, "@echo off\r\necho COUNT=%GIT_CONFIG_COUNT%\r\necho K0=%GIT_CONFIG_KEY_0%\r\necho V0=%GIT_CONFIG_VALUE_0%\r\necho K1=%GIT_CONFIG_KEY_1%\r\necho V1=%GIT_CONFIG_VALUE_1%\r\n");
+        try
+        {
+            var probe = new GitCommandService { GitPath = recorder };
+            var result = await probe.RunAsync(probeRoot, ["--version"]);
+            // 通配值必须存在：命令行 -c 会被 git 过滤掉，只有环境变量能传到对端子进程。
+            Assert.Contains("COUNT=3", result.Output);
+            Assert.Contains("K0=safe.directory", result.Output);
+            Assert.Contains("V0=*", result.Output);
+            Assert.Contains("K1=safe.directory", result.Output);
+            Assert.Contains("V1=" + Path.GetPathRoot(probeRoot), result.Output);
+        }
+        finally { Directory.Delete(probeRoot, recursive: true); }
+    }
+
     /// <summary>绑定选错目录时给出可执行的说明，而不是 Git 的原始报错。</summary>
     [Fact]
     public async Task BindingUnhelpfulDirectoryExplainsWhatToSelect()

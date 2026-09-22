@@ -1,4 +1,3 @@
-using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
@@ -30,8 +29,8 @@ public sealed class GitCommandService
             start.ArgumentList.Add("-C");
             start.ArgumentList.Add(directory);
         }
-        // -c 与 -C 同为全局选项，必须排在任何子命令之前，否则会被当成子命令参数。
-        AddSafeDirectory(start.ArgumentList, directory);
+        // -C 是全局选项，必须排在任何子命令之前，否则会被当成子命令参数。
+        ApplySafeDirectory(start, directory);
         foreach (var arg in args) start.ArgumentList.Add(arg);
         start.Environment["GIT_TERMINAL_PROMPT"] = "0";
         start.Environment["GCM_INTERACTIVE"] = "Never";
@@ -62,18 +61,26 @@ public sealed class GitCommandService
     }
 
     /// <summary>抑制 Git 的 dubious ownership 检查；不改动用户全局配置。</summary>
-    private static void AddSafeDirectory(Collection<string> target, string? directory)
+    private static void ApplySafeDirectory(ProcessStartInfo start, string? directory)
     {
-        // safe.directory 只影响 Git 的所有者校验，不改变传输、引用或工作区数据；
-        // 必须走命令行 -c，避免像 git config --global 那样污染用户自己的 Git 环境。
-        target.Add("-c");
-        target.Add("safe.directory=*");
-        if (string.IsNullOrWhiteSpace(directory)) return;
-        // 目录形式与仓库形式各写一份，覆盖 Git 两种匹配路径；重复项不影响结果。
-        target.Add("-c");
-        target.Add("safe.directory=" + Path.GetFullPath(directory));
-        target.Add("-c");
-        target.Add("safe.directory=" + Path.Combine(Path.GetFullPath(directory), ".git"));
+        // safe.directory 只影响 Git 的所有者校验，不改变传输、引用或工作区数据。
+        // 必须用环境变量而不是命令行 -c：git 会把 -c 转成 GIT_CONFIG_COUNT 传给子进程，
+        // 但传之前会过滤 safe.directory，导致 push/fetch 派生的 receive-pack、upload-pack
+        // 仍按可疑所有权拒绝 FAT32 上的裸仓库。环境变量由子进程原样继承。
+        var values = new List<string> { "*" };
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            // 目录形式与仓库形式各写一份，覆盖 Git 两种匹配路径。
+            var full = Path.GetFullPath(directory);
+            values.Add(full);
+            values.Add(Path.Combine(full, ".git"));
+        }
+        start.Environment["GIT_CONFIG_COUNT"] = values.Count.ToString();
+        for (var i = 0; i < values.Count; i++)
+        {
+            start.Environment[$"GIT_CONFIG_KEY_{i}"] = "safe.directory";
+            start.Environment[$"GIT_CONFIG_VALUE_{i}"] = values[i];
+        }
     }
 
     /// <summary>持续转发 Git 进度，保留完整错误信息用于诊断。</summary>
