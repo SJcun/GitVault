@@ -65,7 +65,7 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>普通命令是否可执行。</summary>
-    public bool CanWork => !IsBusy && settingsAvailable;
+    public bool CanWork => !IsBusy && settingsAvailable && !Dialogs.IsOpen;
     /// <summary>操作 Vault 需要有效连接。</summary>
     public bool CanUseVault => CanWork && current is not null && IsOnline;
     /// <summary>克隆或绑定需要已选中仓库。</summary>

@@ -12,6 +12,20 @@ public sealed record InputField(string Label, string Value = "", string? Picker 
 /// <summary>集中处理简单输入对话框，避免为一次性表单引入框架。</summary>
 public static class Dialogs
 {
+    /// <summary>正在处理的模态窗口数量，包含关闭时尚未返回的窗口。</summary>
+    private static int modalDepth;
+
+    /// <summary>表单仍在处理时，阻止主窗口激活或设备通知抢先启动后台操作。</summary>
+    public static bool IsOpen => modalDepth > 0;
+
+    /// <summary>直到模态调用返回才解除保护，避免关闭窗口时的激活事件抢占提交。</summary>
+    private static bool? ShowModal(Func<bool?> show)
+    {
+        modalDepth++;
+        try { return show(); }
+        finally { modalDepth--; }
+    }
+
     /// <summary>取路径的文件夹名，用于把所选项目目录变成默认名称。</summary>
     public static string FolderNameOf(string path)
     {
@@ -83,7 +97,7 @@ public static class Dialogs
         panel.Children.Add(actions);
         window.Content = panel;
         window.Loaded += (_, _) => inputs.FirstOrDefault()?.Focus();
-        return window.ShowDialog() == true ? inputs.Select(input => input.Text.Trim()).ToArray() : null;
+        return ShowModal(window.ShowDialog) == true ? inputs.Select(input => input.Text.Trim()).ToArray() : null;
     }
 
     /// <summary>源字段变化时同步派生字段；用户手动改过派生字段后不再覆盖。</summary>
@@ -112,7 +126,7 @@ public static class Dialogs
     public static string? Folder(string title)
     {
         var dialog = new OpenFolderDialog { Title = title };
-        return dialog.ShowDialog(Application.Current.MainWindow) == true ? dialog.FolderName : null;
+        return ShowModal(() => dialog.ShowDialog(Application.Current.MainWindow)) == true ? dialog.FolderName : null;
     }
 
     /// <summary>展示说明并等待用户确认，取消时返回 false。</summary>
@@ -136,7 +150,7 @@ public static class Dialogs
         actions.Children.Add(confirm);
         panel.Children.Add(actions);
         window.Content = panel;
-        return window.ShowDialog() == true;
+        return ShowModal(window.ShowDialog) == true;
     }
 
     /// <summary>提供可选择并复制的错误详情。</summary>
@@ -150,6 +164,6 @@ public static class Dialogs
         panel.Children.Add(close);
         panel.Children.Add(new TextBox { Text = message, IsReadOnly = true, TextWrapping = TextWrapping.Wrap, VerticalScrollBarVisibility = ScrollBarVisibility.Auto });
         window.Content = panel;
-        window.ShowDialog();
+        ShowModal(window.ShowDialog);
     }
 }
