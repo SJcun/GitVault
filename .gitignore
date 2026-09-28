@@ -6,4 +6,4 @@ TestResults/
 *.user
 
 /docs/
-tests/
+/tests/
