@@ -70,10 +70,12 @@ public partial class MainViewModel : ObservableObject
     public bool CanUseVault => CanWork && current is not null && IsOnline;
     /// <summary>克隆或绑定需要已选中仓库。</summary>
     public bool CanSelectLocal => CanUseVault && SelectedItem is not null;
-    /// <summary>推送仅接受已验证的领先或缺失分支状态。</summary>
-    public bool CanPush => CanSelectLocal && SelectedItem?.Status?.Kind is SyncKind.Ahead or SyncKind.MissingBranch;
-    /// <summary>拉取仅接受干净工作区的落后状态。</summary>
-    public bool CanPull => CanSelectLocal && SelectedItem?.Status is { Kind: SyncKind.Behind, IsDirty: false, HasOperation: false };
+    /// <summary>领先、缺失分支或仅有新标签时允许推送；冲突标签需人工处理。</summary>
+    public bool CanPush => CanSelectLocal && SelectedItem?.Status is { TagConflict: null } state
+        && (state.Kind is SyncKind.Ahead or SyncKind.MissingBranch || state.Kind == SyncKind.Synced && state.TagsToPush > 0);
+    /// <summary>落后或仅有新标签时允许拉取，仍要求干净工作区。</summary>
+    public bool CanPull => CanSelectLocal && SelectedItem?.Status is { IsDirty: false, HasOperation: false, TagConflict: null } state
+        && (state.Kind == SyncKind.Behind || state.Kind == SyncKind.Synced && state.TagsToPull > 0);
     /// <summary>打开工作目录不修改 Git 数据。</summary>
     public bool CanOpenLocal => SelectedItem?.LocalPath is { } path && Directory.Exists(path);
     /// <summary>有选择时显示详情。</summary>
@@ -104,14 +106,18 @@ public partial class MainViewModel : ObservableObject
         SyncKind.Diverged => "两边都有新提交。请打开本地目录，用现有 Git 工具合并或变基后再刷新。",
         SyncKind.Unrelated => "分支没有共同历史，请检查是否绑定了正确的项目。",
         SyncKind.Unsupported => SelectedItem.Status.Message,
+        _ when SelectedItem?.Status?.TagConflict is not null => "同名标签指向不同对象，请在 Git 工具中处理后刷新。",
         SyncKind.MissingBranch => "点击推送会在 U 盘创建当前同名分支。",
-        SyncKind.Behind when SelectedItem.Status.IsDirty => "拉取前请先提交、暂存或移走工作区修改；程序不会自动 stash。",
-        _ => "每次操作只同步当前分支。提交代码和切换分支请使用现有 Git 工具。"
+        SyncKind.Behind when SelectedItem?.Status?.IsDirty == true => "拉取前请先提交、暂存或移走工作区修改；程序不会自动 stash。",
+        _ => "每次操作同步当前分支及其历史中的标签。提交代码和切换分支请使用现有 Git 工具。"
     };
     /// <summary>设备连接说明。</summary>
     public string ConnectionText => IsOnline ? "已连接" : "未连接";
     /// <summary>推送按钮在新分支状态下明确说明创建行为。</summary>
-    public string PushLabel => SelectedItem?.Status?.Kind == SyncKind.MissingBranch ? "在 U 盘创建此分支" : "推送到 U 盘";
+    public string PushLabel => SelectedItem?.Status?.Kind == SyncKind.MissingBranch ? "在 U 盘创建此分支"
+        : SelectedItem?.Status is { Kind: SyncKind.Synced, TagsToPush: > 0 } ? "推送标签到 U 盘" : "推送到 U 盘";
+    /// <summary>只有标签待拉取时明确显示标签操作。</summary>
+    public string PullLabel => SelectedItem?.Status is { Kind: SyncKind.Synced, TagsToPull: > 0 } ? "从 U 盘拉取标签" : "从 U 盘拉取";
 
     /// <summary>启动时加载设置并发现设备；Git 缺失仍可进入设置修正路径。</summary>
     public async Task InitializeAsync()
@@ -374,11 +380,11 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    /// <summary>推送当前分支。</summary>
+    /// <summary>推送当前分支及相关标签。</summary>
     [RelayCommand(CanExecute = nameof(CanPush))]
     private Task PushAsync() => TransferAsync(true);
 
-    /// <summary>快进拉取当前分支。</summary>
+    /// <summary>快进拉取当前分支及相关标签。</summary>
     [RelayCommand(CanExecute = nameof(CanPull))]
     private Task PullAsync() => TransferAsync(false);
 
@@ -532,7 +538,7 @@ public partial class MainViewModel : ObservableObject
     {
         foreach (var name in new[] { nameof(CanWork), nameof(CanUseVault), nameof(CanSelectLocal), nameof(CanPush), nameof(CanPull), nameof(CanOpenLocal),
             nameof(HasSelection), nameof(ShowDisconnected), nameof(ShowWelcome), nameof(NeedsBinding), nameof(DetailTitle), nameof(LocalPath), nameof(RemotePath), nameof(BranchText),
-            nameof(StatusText), nameof(WorktreeText), nameof(Guidance), nameof(ConnectionText), nameof(PushLabel) }) OnPropertyChanged(name);
+            nameof(StatusText), nameof(WorktreeText), nameof(Guidance), nameof(ConnectionText), nameof(PushLabel), nameof(PullLabel) }) OnPropertyChanged(name);
         foreach (var command in new IRelayCommand[] { DiscoverCommand, OpenLibraryCommand, CreateLibraryCommand, ImportCommand, CloneCommand, BindCommand,
             RefreshCommand, PushCommand, PullCommand, RecoverCommand, SettingsCommand, OpenLocalCommand }) command.NotifyCanExecuteChanged();
     }

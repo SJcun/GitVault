@@ -62,10 +62,22 @@ public enum DirectoryKind
 /// <summary>一次成功检查得到的状态；失败不会构造为已同步。</summary>
 public sealed record RepositoryStatus(
     string Branch, string Head, string? RemoteHead, int Ahead, int Behind,
-    bool IsDirty, bool HasOperation, SyncKind Kind, string Message, DateTimeOffset CheckedAt);
+    bool IsDirty, bool HasOperation, SyncKind Kind, string Message, DateTimeOffset CheckedAt)
+{
+    /// <summary>当前分支历史中待推送的标签数量。</summary>
+    public int TagsToPush { get; init; }
+    /// <summary>当前分支历史中待拉取的标签数量。</summary>
+    public int TagsToPull { get; init; }
+    /// <summary>两端同名但指向不同对象的标签名称。</summary>
+    public string? TagConflict { get; init; }
+}
 
 /// <summary>供界面展示的一条提交。</summary>
-public sealed record CommitInfo(string Hash, string Subject, string Author, string Time);
+public sealed record CommitInfo(string Hash, string Subject, string Author, string Time)
+{
+    /// <summary>该提交上的本机标签，用于最近提交列表展示。</summary>
+    public string Tags { get; init; } = "";
+}
 
 /// <summary>Git 进程退出后的完整结果。</summary>
 public sealed record GitResult(int ExitCode, string Output, string Error);

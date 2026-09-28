@@ -88,7 +88,7 @@ public sealed class RepositoryTests : IDisposable
         Assert.Equal("my edits", await File.ReadAllTextAsync(Path.Combine(b, "initial.txt")));
     }
 
-    /// <summary>新分支可显式推送，删除后刷新不沿用旧缓存；标签不会隐式推送。</summary>
+    /// <summary>新分支可显式推送，删除后刷新不沿用旧缓存；相关标签随分支推送。</summary>
     [Fact]
     public async Task NewBranchAndPruningStayInsidePrivateReferences()
     {
@@ -100,7 +100,7 @@ public sealed class RepositoryTests : IDisposable
         Assert.Equal(SyncKind.MissingBranch, (await repositories.RefreshAsync(vault, repository, a)).Kind);
         Assert.Equal(SyncKind.Synced, (await repositories.PushAsync(vault, repository, a)).Kind);
         var remote = vaults.RepositoryPath(vault, repository);
-        Assert.Empty((await git.RunAsync(remote, ["tag", "--list"])).Output.Trim());
+        Assert.Contains("local-tag", (await git.RunAsync(remote, ["tag", "--list"])).Output);
         await git.RunAsync(remote, ["update-ref", "-d", "refs/heads/feature/demo"]);
         Assert.Equal(SyncKind.MissingBranch, (await repositories.RefreshAsync(vault, repository, a)).Kind);
     }
@@ -279,6 +279,92 @@ public sealed class RepositoryTests : IDisposable
         await repositories.PushAsync(vault, repository, a);
         Assert.Equal(original, (await git.RunAsync(remote, ["rev-parse", "refs/heads/other"])).Output.Trim());
         Assert.Equal(await HeadAsync(a), await HeadAsync(remote));
+    }
+
+    /// <summary>没有新提交时，轻量与附注标签仍能从 A 经 U 盘同步到 B。</summary>
+    [Fact]
+    public async Task TagsSyncWithoutNewCommits()
+    {
+        var (a, vault, repository) = await SeedAsync();
+        var b = Path.Combine(root, "B");
+        await repositories.CloneAsync(vault, repository, b);
+        await git.RunAsync(a, ["tag", "lightweight"]);
+        await git.RunAsync(a, ["-c", "user.name=Tester", "-c", "user.email=test@example.invalid", "tag", "-a", "annotated", "-m", "说明"]);
+        var outgoing = await repositories.RefreshAsync(vault, repository, a);
+        Assert.Equal(SyncKind.Synced, outgoing.Kind);
+        Assert.Equal(2, outgoing.TagsToPush);
+        await repositories.PushAsync(vault, repository, a);
+        var incoming = await repositories.RefreshAsync(vault, repository, b);
+        Assert.Equal(2, incoming.TagsToPull);
+        await repositories.PullAsync(vault, repository, b);
+        foreach (var name in new[] { "lightweight", "annotated" })
+            Assert.Equal((await git.RunAsync(a, ["rev-parse", $"refs/tags/{name}"])).Output.Trim(),
+                (await git.RunAsync(b, ["rev-parse", $"refs/tags/{name}"])).Output.Trim());
+        Assert.Equal(0, (await repositories.RefreshAsync(vault, repository, b)).TagsToPull);
+        var recent = await repositories.RecentAsync(b);
+        Assert.Contains("lightweight", recent[0].Tags);
+        Assert.Contains("annotated", recent[0].Tags);
+        await git.RunAsync(a, ["tag", "-d", "lightweight"]);
+        Assert.Equal(1, (await repositories.RefreshAsync(vault, repository, a)).TagsToPull);
+        await repositories.PushAsync(vault, repository, a);
+        Assert.Contains("lightweight", (await git.RunAsync(vaults.RepositoryPath(vault, repository), ["tag", "--list"])).Output);
+    }
+
+    /// <summary>当前 main 的标签同步不带入只属于 feature 历史的标签。</summary>
+    [Fact]
+    public async Task CurrentBranchTagsExcludeOtherBranch()
+    {
+        var (a, vault, repository) = await SeedAsync();
+        var b = Path.Combine(root, "B");
+        await repositories.CloneAsync(vault, repository, b);
+        await git.RunAsync(a, ["checkout", "-b", "feature"]);
+        await CommitAsync(a, "feature.txt", "feature");
+        await git.RunAsync(a, ["tag", "feature-only"]);
+        await repositories.PushAsync(vault, repository, a);
+        Assert.Equal(0, (await repositories.RefreshAsync(vault, repository, b)).TagsToPull);
+        var recent = await repositories.RecentAsync(b);
+        Assert.Contains("lightweight", recent[0].Tags);
+        Assert.Contains("annotated", recent[0].Tags);
+        await git.RunAsync(a, ["checkout", "main"]);
+        await git.RunAsync(a, ["tag", "shared"]);
+        await git.RunAsync(a, ["checkout", "feature"]);
+        Assert.Equal(1, (await repositories.RefreshAsync(vault, repository, a)).TagsToPush);
+        await repositories.PushAsync(vault, repository, a);
+        Assert.Equal(1, (await repositories.RefreshAsync(vault, repository, b)).TagsToPull);
+        await repositories.PullAsync(vault, repository, b);
+        Assert.Equal("shared", (await git.RunAsync(b, ["tag", "--list"])).Output.Trim());
+    }
+
+    /// <summary>同名标签指向不同对象时，拒绝自动覆盖任意一端。</summary>
+    [Fact]
+    public async Task ConflictingTagsArePreserved()
+    {
+        var (a, vault, repository) = await SeedAsync();
+        var b = Path.Combine(root, "B");
+        await repositories.CloneAsync(vault, repository, b);
+        await git.RunAsync(a, ["-c", "user.name=Tester", "-c", "user.email=test@example.invalid", "tag", "-a", "release", "-m", "A"]);
+        await git.RunAsync(b, ["-c", "user.name=Tester", "-c", "user.email=test@example.invalid", "tag", "-a", "release", "-m", "B"]);
+        var localTag = (await git.RunAsync(b, ["rev-parse", "refs/tags/release"])).Output.Trim();
+        await repositories.PushAsync(vault, repository, a);
+        var state = await repositories.RefreshAsync(vault, repository, b);
+        Assert.Contains("release", state.TagConflict);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repositories.PullAsync(vault, repository, b));
+        Assert.Equal(localTag, (await git.RunAsync(b, ["rev-parse", "refs/tags/release"])).Output.Trim());
+    }
+
+    /// <summary>最近提交在对应提交旁显示轻量与附注标签，不混入其他提交的标签。</summary>
+    [Fact]
+    public async Task RecentCommitsShowTagsOnTheirCommits()
+    {
+        var (a, _, _) = await SeedAsync();
+        await git.RunAsync(a, ["tag", "lightweight"]);
+        await CommitAsync(a, "next.txt", "next");
+        await git.RunAsync(a, ["-c", "user.name=Tester", "-c", "user.email=test@example.invalid", "tag", "-a", "annotated", "-m", "说明"]);
+        var commits = await repositories.RecentAsync(a);
+        Assert.Contains("annotated", commits[0].Tags);
+        Assert.DoesNotContain("lightweight", commits[0].Tags);
+        Assert.Contains("lightweight", commits[1].Tags);
+        Assert.DoesNotContain("annotated", commits[1].Tags);
     }
 
     /// <summary>路径穿越与损坏配置不能被静默接受或重置。</summary>

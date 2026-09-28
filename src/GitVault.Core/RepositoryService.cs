@@ -65,7 +65,11 @@ public sealed class RepositoryService(GitCommandService git, VaultService vaults
         local = await InspectLocalAsync(localPath, token);
         if (local.Problem is not null) return Status(local, null, 0, 0, SyncKind.Unsupported, local.Problem);
         var remote = await git.RunAsync(localPath, ["rev-parse", "--verify", "--quiet", ReferencePrefix(vault, repository) + local.Branch], token, check: false);
-        if (remote.ExitCode == 1) return Status(local, null, 0, 0, SyncKind.MissingBranch, "U 盘没有同名分支");
+        if (remote.ExitCode == 1)
+        {
+            var missingTags = await GetTagChangesAsync(localPath, vaults.VerifyRepository(vault, repository), local.Head, null, token);
+            return Status(local, null, 0, 0, SyncKind.MissingBranch, "U 盘没有同名分支", missingTags);
+        }
         if (remote.ExitCode != 0) throw new GitException("读取 U 盘缓存分支", remote);
         var remoteHead = remote.Output.Trim();
         var common = await git.RunAsync(localPath, ["merge-base", local.Head, remoteHead], token, check: false);
@@ -85,43 +89,74 @@ public sealed class RepositoryService(GitCommandService git, VaultService vaults
             SyncKind.Synced => "当前分支已同步", SyncKind.Ahead => $"本地领先 {ahead} 次提交",
             SyncKind.Behind => $"U 盘领先 {behind} 次提交", _ => $"已分叉：本地 {ahead} / U 盘 {behind}"
         };
-        return Status(local, remoteHead, ahead, behind, kind, message);
+        var tags = await GetTagChangesAsync(localPath, vaults.VerifyRepository(vault, repository), local.Head, remoteHead, token);
+        return Status(local, remoteHead, ahead, behind, kind, message, tags);
     }
 
-    /// <summary>普通推送仅发送当前分支；分叉与落后状态直接拒绝。</summary>
+    /// <summary>原子推送当前分支及其历史中的新标签；分叉与落后状态直接拒绝。</summary>
     public async Task<RepositoryStatus> PushAsync(VaultLocation vault, VaultRepository repository, string localPath, CancellationToken token = default)
     {
         var state = await RefreshAsync(vault, repository, localPath, token);
         if (state.Kind is not (SyncKind.Ahead or SyncKind.MissingBranch or SyncKind.Synced))
             throw new InvalidOperationException("当前状态不能推送：" + state.Message);
+        if (state.TagConflict is not null) throw new InvalidOperationException("同名标签指向不同对象，请先在 Git 工具中处理：" + state.TagConflict);
         await EnsureUnchangedAsync(localPath, state, false, token);
         var destination = vaults.VerifyRepository(vault, repository);
-        // 禁用用户配置中的自动推标签，确保按钮只操作当前分支。
-        await git.RunAsync(localPath, ["-c", "push.followTags=false", "push", "--progress", "--recurse-submodules=no", destination,
-            $"refs/heads/{state.Branch}:refs/heads/{state.Branch}"], token);
+        var tags = await GetTagChangesAsync(localPath, destination, state.Head, state.RemoteHead, token);
+        if (tags.Conflict is not null) throw new InvalidOperationException("同名标签指向不同对象，请先在 Git 工具中处理：" + tags.Conflict);
+        var refs = new List<string> { $"refs/heads/{state.Branch}:refs/heads/{state.Branch}" };
+        refs.AddRange(tags.Push.Select(name => $"refs/tags/{name}:refs/tags/{name}"));
+        // 显式列出标签并要求原子更新，避免用户 Git 配置或部分推送扩大同步范围。
+        await git.RunAsync(localPath, ["-c", "push.followTags=false", "push", "--atomic", "--progress", "--recurse-submodules=no", destination, .. refs], token);
         return await RefreshAsync(vault, repository, localPath, token);
     }
 
-    /// <summary>只合入已验证的提交 OID，拒绝脏工作区、分叉和未完成的 Git 操作。</summary>
+    /// <summary>快进当前分支后拉取其历史中的新标签；同名异指向时不改写标签。</summary>
     public async Task<RepositoryStatus> PullAsync(VaultLocation vault, VaultRepository repository, string localPath, CancellationToken token = default)
     {
         var state = await RefreshAsync(vault, repository, localPath, token);
         if (state.Kind is not (SyncKind.Behind or SyncKind.Synced))
             throw new InvalidOperationException("当前状态不能快进拉取：" + state.Message);
+        if (state.TagConflict is not null) throw new InvalidOperationException("同名标签指向不同对象，请先在 Git 工具中处理：" + state.TagConflict);
         await EnsureUnchangedAsync(localPath, state, true, token);
-        vaults.VerifyRepository(vault, repository);
-        await git.RunAsync(localPath, ["-c", "merge.autoStash=false", "-c", "core.logAllRefUpdates=true", "merge", "--ff-only", "--no-autostash", state.RemoteHead!], token);
+        var source = vaults.VerifyRepository(vault, repository);
+        var tags = await GetTagChangesAsync(localPath, source, state.Head, state.RemoteHead, token);
+        if (tags.Conflict is not null) throw new InvalidOperationException("同名标签指向不同对象，请先在 Git 工具中处理：" + tags.Conflict);
+        if (state.Kind == SyncKind.Behind)
+            await git.RunAsync(localPath, ["-c", "merge.autoStash=false", "-c", "core.logAllRefUpdates=true", "merge", "--ff-only", "--no-autostash", state.RemoteHead!], token);
+        if (tags.Pull.Length > 0)
+        {
+            var refs = tags.Pull.Select(name => $"refs/tags/{name}:refs/tags/{name}");
+            // 只抓取预先确认属于当前分支的标签，不改动其他标签或已有 remote。
+            await git.RunAsync(localPath, ["fetch", "--atomic", "--progress", "--no-tags", "--no-prune", "--no-recurse-submodules", "--no-write-fetch-head", "--refmap=", source, .. refs], token);
+        }
         return await RefreshAsync(vault, repository, localPath, token);
     }
 
-    /// <summary>读取最近提交，以字段分隔符避免依赖本地化输出。</summary>
+    /// <summary>读取最近提交及其本机标签，以字段分隔符避免依赖本地化输出。</summary>
     public async Task<IReadOnlyList<CommitInfo>> RecentAsync(string localPath, CancellationToken token = default)
     {
-        var result = await git.RunAsync(localPath, ["log", "-20", "--date=iso-strict", "--format=%h%x1f%s%x1f%an%x1f%ad"], token, check: false);
+        var result = await git.RunAsync(localPath, ["log", "-20", "--date=iso-strict", "--format=%h%x1f%s%x1f%an%x1f%ad%x1f%H"], token, check: false);
         if (result.ExitCode != 0) return [];
+        var tagResult = await git.RunAsync(localPath,
+            ["for-each-ref", "--format=%(refname:strip=2)%09%(objecttype)%09%(objectname)%09%(*objecttype)%09%(*objectname)", "refs/tags"], token);
+        var tagsByCommit = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        foreach (var line in tagResult.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = line.TrimEnd('\r').Split('\t');
+            if (parts.Length != 5) continue;
+            // 轻量标签直接指向提交；附注标签通过解引用字段找到目标提交。
+            var commit = parts[1] == "commit" ? parts[2] : parts[3] == "commit" ? parts[4] : null;
+            if (commit is null) continue;
+            if (!tagsByCommit.TryGetValue(commit, out var names)) tagsByCommit[commit] = names = [];
+            names.Add(parts[0]);
+        }
         return result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries)
-            .Select(line => line.TrimEnd('\r').Split('\x1f')).Where(parts => parts.Length == 4)
-            .Select(parts => new CommitInfo(parts[0], parts[1], parts[2], parts[3])).ToList();
+            .Select(line => line.TrimEnd('\r').Split('\x1f')).Where(parts => parts.Length == 5)
+            .Select(parts => new CommitInfo(parts[0], parts[1], parts[2], parts[3])
+            {
+                Tags = tagsByCommit.TryGetValue(parts[4], out var names) ? "  标签：" + string.Join("、", names) : ""
+            }).ToList();
     }
 
     /// <summary>恢复已创建但清单登记失败的完整裸仓库；忽略导入临时目录。</summary>
@@ -143,6 +178,40 @@ public sealed class RepositoryService(GitCommandService git, VaultService vaults
         }
         return count;
     }
+
+    /// <summary>按提交可达性找出当前分支相关标签，并以原始引用对象识别同名冲突。</summary>
+    private async Task<TagChanges> GetTagChangesAsync(string localPath, string remotePath, string localHead, string? remoteHead, CancellationToken token)
+    {
+        var localRefs = await ReadTagRefsAsync(localPath, token);
+        var remoteRefs = await ReadTagRefsAsync(remotePath, token);
+        var localNames = await ReadMergedTagsAsync(localPath, localHead, token);
+        var remoteNames = remoteHead is null ? [] : await ReadMergedTagsAsync(remotePath, remoteHead, token);
+        var conflict = localNames.Concat(remoteNames).Distinct(StringComparer.Ordinal)
+            .FirstOrDefault(name => localRefs.TryGetValue(name, out var local) && remoteRefs.TryGetValue(name, out var remote) && local != remote);
+        var push = localNames.Where(name => !remoteRefs.ContainsKey(name)).ToArray();
+        var pull = remoteNames.Where(name => !localRefs.ContainsKey(name)).ToArray();
+        return new TagChanges(push, pull, conflict);
+    }
+
+    /// <summary>读取标签的原始引用 OID，保留附注标签对象与轻量标签的区别。</summary>
+    private async Task<Dictionary<string, string>> ReadTagRefsAsync(string path, CancellationToken token)
+    {
+        var result = await git.RunAsync(path, ["show-ref", "--tags"], token, check: false);
+        if (result.ExitCode == 1) return new Dictionary<string, string>(StringComparer.Ordinal);
+        if (result.ExitCode != 0) throw new GitException("读取标签引用", result);
+        var tags = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var line in result.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var parts = line.TrimEnd('\r').Split(' ', 2);
+            tags.Add(parts[1]["refs/tags/".Length..], parts[0]);
+        }
+        return tags;
+    }
+
+    /// <summary>仅选择指向指定分支历史中提交的标签，排除其他分支与非提交对象。</summary>
+    private async Task<string[]> ReadMergedTagsAsync(string path, string head, CancellationToken token) =>
+        (await git.RunAsync(path, ["tag", "--list", "--merged", head], token)).Output
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     /// <summary>使用仅属于此绑定的引用空间，避免污染已有 remote 和 FETCH_HEAD。</summary>
     private async Task FetchAsync(VaultLocation vault, VaultRepository repository, string localPath, CancellationToken token)
@@ -251,9 +320,23 @@ public sealed class RepositoryService(GitCommandService git, VaultService vaults
             throw new InvalidOperationException("仓库名称不能使用 Windows 保留名称。");
     }
 
-    /// <summary>把内部快照组合成界面状态。</summary>
-    private static RepositoryStatus Status(LocalSnapshot local, string? remote, int ahead, int behind, SyncKind kind, string message) =>
-        new(local.Branch, local.Head, remote, ahead, behind, local.Dirty, local.Operation, kind, message, DateTimeOffset.Now);
+    /// <summary>把分支关系及标签差异组合成界面状态。</summary>
+    private static RepositoryStatus Status(LocalSnapshot local, string? remote, int ahead, int behind, SyncKind kind, string message, TagChanges? tags = null)
+    {
+        if (tags?.Conflict is not null) message += $"；标签冲突：{tags.Conflict}";
+        else if (tags is not null && (tags.Push.Length > 0 || tags.Pull.Length > 0))
+            message += $"；标签待推送 {tags.Push.Length} 个、待拉取 {tags.Pull.Length} 个";
+        return new(local.Branch, local.Head, remote, ahead, behind, local.Dirty, local.Operation, kind, message, DateTimeOffset.Now)
+        {
+            TagsToPush = tags?.Push.Length ?? 0, TagsToPull = tags?.Pull.Length ?? 0, TagConflict = tags?.Conflict
+        };
+    }
+
+    /// <summary>当前分支的双向标签差异及同名异指向标签。</summary>
+    /// <param name="Push">本地有而 U 盘没有的相关标签。</param>
+    /// <param name="Pull">U 盘有而本地没有的相关标签。</param>
+    /// <param name="Conflict">两端同名但对象不同的标签。</param>
+    private sealed record TagChanges(string[] Push, string[] Pull, string? Conflict);
 
     /// <summary>本地检查结果；Problem 为空表示可以进一步比较提交。</summary>
     private sealed record LocalSnapshot(string Branch, string Head, bool Dirty, bool Operation, string? Problem);

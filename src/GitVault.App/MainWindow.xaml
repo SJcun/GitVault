@@ -131,7 +131,7 @@
                             </Border>
                             <WrapPanel Margin="0,0,0,12">
                                 <Button Content="{Binding PushLabel}" Command="{Binding PushCommand}" Tag="{StaticResource IconPush}" Style="{StaticResource PrimaryButton}" Margin="0,0,8,8" />
-                                <Button Content="从 U 盘拉取" Command="{Binding PullCommand}" Tag="{StaticResource IconPull}" Margin="0,0,8,8" />
+                                <Button Content="{Binding PullLabel}" Command="{Binding PullCommand}" Tag="{StaticResource IconPull}" Margin="0,0,8,8" />
                                 <Button Content="克隆到本机" Command="{Binding CloneCommand}" Tag="{StaticResource IconClone}" Margin="0,0,8,8" />
                                 <Button Content="绑定已有项目" Command="{Binding BindCommand}" Tag="{StaticResource IconBind}" Margin="0,0,0,8" />
                             </WrapPanel>
@@ -144,7 +144,7 @@
                                 <Border BorderBrush="#EBEFF2" BorderThickness="0,0,0,1" Padding="0,12">
                                     <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="78" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                                         <TextBlock Text="{Binding Hash}" FontFamily="Consolas" Foreground="{StaticResource Accent}" />
-                                        <StackPanel Grid.Column="1"><TextBlock Text="{Binding Subject}" TextWrapping="Wrap" /><TextBlock Foreground="{StaticResource Muted}" FontSize="11" Margin="0,5,0,0"><Run Text="{Binding Author}" /><Run Text=" · " /><Run Text="{Binding Time}" /></TextBlock></StackPanel>
+                                        <StackPanel Grid.Column="1"><TextBlock TextWrapping="Wrap"><Run Text="{Binding Subject}" /><Run Text="{Binding Tags}" Foreground="{StaticResource Accent}" /></TextBlock><TextBlock Foreground="{StaticResource Muted}" FontSize="11" Margin="0,5,0,0"><Run Text="{Binding Author}" /><Run Text=" · " /><Run Text="{Binding Time}" /></TextBlock></StackPanel>
                                     </Grid>
                                 </Border>
                             </DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
