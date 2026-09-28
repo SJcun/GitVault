@@ -22,6 +22,12 @@ public partial class MainViewModel : ObservableObject
     /// <summary>当前选定的 Vault 与本次任务的取消源。</summary>
     private VaultLocation? current;
     private CancellationTokenSource? cancellation;
+    /// <summary>当前串行任务完成时通知等待执行的传输。</summary>
+    private TaskCompletionSource? operationCompleted;
+    /// <summary>正在检查其他仓库时，允许已检查的当前仓库发起传输。</summary>
+    private bool isRefreshingOtherRows;
+    /// <summary>传输已请求，阻止重复点击和其他任务插队。</summary>
+    private bool transferQueued;
     /// <summary>设置损坏时禁止后续保存，避免覆盖用户文件。</summary>
     private bool settingsAvailable;
 
@@ -65,16 +71,19 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>普通命令是否可执行。</summary>
-    public bool CanWork => !IsBusy && settingsAvailable && !Dialogs.IsOpen;
+    public bool CanWork => !IsBusy && !transferQueued && settingsAvailable && !Dialogs.IsOpen;
     /// <summary>操作 Vault 需要有效连接。</summary>
     public bool CanUseVault => CanWork && current is not null && IsOnline;
     /// <summary>克隆或绑定需要已选中仓库。</summary>
     public bool CanSelectLocal => CanUseVault && SelectedItem is not null;
+    /// <summary>当前仓库检查完成后，其他仓库的检查不阻止传输请求。</summary>
+    private bool CanTransfer => settingsAvailable && !Dialogs.IsOpen && current is not null && IsOnline && SelectedItem is not null
+        && !transferQueued && (!IsBusy || isRefreshingOtherRows);
     /// <summary>领先、缺失分支或仅有新标签时允许推送；冲突标签需人工处理。</summary>
-    public bool CanPush => CanSelectLocal && SelectedItem?.Status is { TagConflict: null } state
+    public bool CanPush => CanTransfer && SelectedItem?.Status is { TagConflict: null } state
         && (state.Kind is SyncKind.Ahead or SyncKind.MissingBranch || state.Kind == SyncKind.Synced && state.TagsToPush > 0);
     /// <summary>落后或仅有新标签时允许拉取，仍要求干净工作区。</summary>
-    public bool CanPull => CanSelectLocal && SelectedItem?.Status is { IsDirty: false, HasOperation: false, TagConflict: null } state
+    public bool CanPull => CanTransfer && SelectedItem?.Status is { IsDirty: false, HasOperation: false, TagConflict: null } state
         && (state.Kind == SyncKind.Behind || state.Kind == SyncKind.Synced && state.TagsToPull > 0);
     /// <summary>打开工作目录不修改 Git 数据。</summary>
     public bool CanOpenLocal => SelectedItem?.LocalPath is { } path && Directory.Exists(path);
@@ -361,14 +370,25 @@ public partial class MainViewModel : ObservableObject
             UpdateDetails();
         }
         await LoadCommitsAsync(token);
-        foreach (var item in Items)
+        isRefreshingOtherRows = true;
+        UpdateDetails();
+        try
         {
-            if (item == selected) continue;
-            await RefreshRowAsync(item, token);
+            foreach (var item in Items)
+            {
+                if (!isRefreshingOtherRows) return;
+                if (item == selected) continue;
+                await RefreshRowAsync(item, token);
+            }
+            if (!isRefreshingOtherRows) return;
+        }
+        finally
+        {
+            isRefreshingOtherRows = false;
+            UpdateDetails();
         }
         var failed = Items.Count(item => item.LocalPath is not null && item.Status is null);
         if (failed > 0) Feedback = $"刷新完成，{failed} 个仓库检查失败 · 查看日志";
-        UpdateDetails();
     }
 
     /// <summary>失败立即清空同步缓存；错误在列表和日志中均可见。</summary>
@@ -399,11 +419,22 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanPull))]
     private Task PullAsync() => TransferAsync(false);
 
-    /// <summary>执行传输，失败后使旧状态失效。</summary>
-    private Task TransferAsync(bool push)
+    /// <summary>优先执行已请求的传输，失败后使旧状态失效。</summary>
+    private async Task TransferAsync(bool push)
     {
         var item = SelectedItem!;
-        return ExecuteAsync(push ? "推送到 U 盘" : "从 U 盘拉取", async token =>
+        if (isRefreshingOtherRows)
+        {
+            // 让当前检查结束后停止遍历，并等待串行任务释放执行权。
+            transferQueued = true;
+            isRefreshingOtherRows = false;
+            Feedback = push ? "推送已请求，等待当前检查完成…" : "拉取已请求，等待当前检查完成…";
+            UpdateDetails();
+            await operationCompleted!.Task;
+            if (!transferQueued) return;
+            transferQueued = false;
+        }
+        await ExecuteAsync(push ? "推送到 U 盘" : "从 U 盘拉取", async token =>
         {
             try
             {
@@ -450,9 +481,13 @@ public partial class MainViewModel : ObservableObject
         catch (Exception error) { Dialogs.Error(error.Message); }
     }
 
-    /// <summary>请求取消当前任务，不把取消视为回滚。</summary>
+    /// <summary>取消当前任务及排队中的传输，不把取消视为回滚。</summary>
     [RelayCommand]
-    private void Cancel() => cancellation?.Cancel();
+    private void Cancel()
+    {
+        transferQueued = false;
+        cancellation?.Cancel();
+    }
 
     /// <summary>复制日志供用户诊断。</summary>
     [RelayCommand]
@@ -466,6 +501,8 @@ public partial class MainViewModel : ObservableObject
     private async Task ExecuteAsync(string title, Func<CancellationToken, Task> action)
     {
         if (IsBusy) return;
+        var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        operationCompleted = completed;
         IsBusy = true;
         Feedback = title + "…";
         using var source = new CancellationTokenSource();
@@ -489,7 +526,14 @@ public partial class MainViewModel : ObservableObject
             if (current is not null && !File.Exists(Path.Combine(current.RootPath, "vault.json"))) MarkOffline();
             Dialogs.Error(error.Message);
         }
-        finally { cancellation = null; IsBusy = false; UpdateDetails(); }
+        finally
+        {
+            cancellation = null;
+            operationCompleted = null;
+            completed.SetResult();
+            IsBusy = false;
+            UpdateDetails();
+        }
     }
 
     /// <summary>读取所选仓库的提交列表。</summary>

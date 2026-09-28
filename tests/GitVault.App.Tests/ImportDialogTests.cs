@@ -103,6 +103,40 @@ public sealed class ImportDialogTests
             Assert.True(selectedUpdatedFirst);
             Assert.All(viewModel.Items, item => Assert.NotNull(item.Status));
 
+            // 选中项目领先时，在其他项目检查期间就能请求推送，且推送确实执行。
+            await git.RunAsync(local, ["-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                "commit", "--allow-empty", "-m", "待推送提交"]);
+            Task? queuedPush = null;
+            viewModel.PropertyChanged += (_, args) =>
+            {
+                if (args.PropertyName == nameof(MainViewModel.CanPush) && viewModel.IsBusy && viewModel.CanPush
+                    && queuedPush is null) queuedPush = viewModel.PushCommand.ExecuteAsync(null);
+            };
+            await viewModel.RecheckRowsAsync();
+            Assert.NotNull(queuedPush);
+            await queuedPush;
+            Assert.Equal(SyncKind.Synced, viewModel.SelectedItem?.Status?.Kind);
+            Assert.Equal("推送到 U 盘完成", viewModel.Feedback);
+
+            // U 盘领先时同样允许提前请求拉取。
+            var otherLocal = Path.Combine(root, "另一台电脑");
+            var transfers = new RepositoryService(git, vaults);
+            await transfers.CloneAsync(vault, viewModel.SelectedItem!.Repository, otherLocal);
+            await git.RunAsync(otherLocal, ["-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                "commit", "--allow-empty", "-m", "远端提交"]);
+            await transfers.PushAsync(vault, viewModel.SelectedItem.Repository, otherLocal);
+            Task? queuedPull = null;
+            viewModel.PropertyChanged += (_, args) =>
+            {
+                if (args.PropertyName == nameof(MainViewModel.CanPull) && viewModel.IsBusy && viewModel.CanPull
+                    && queuedPull is null) queuedPull = viewModel.PullCommand.ExecuteAsync(null);
+            };
+            await viewModel.RecheckRowsAsync();
+            Assert.NotNull(queuedPull);
+            await queuedPull;
+            Assert.Equal(SyncKind.Synced, viewModel.SelectedItem.Status?.Kind);
+            Assert.Equal("从 U 盘拉取完成", viewModel.Feedback);
+
             // 取消表单也必须释放保护，随后正常的窗口激活仍能刷新。
             _ = Application.Current.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() =>
                 Application.Current.Windows.OfType<Window>().Single(window => window.Title == "加入 U 盘代码库").DialogResult = false));
