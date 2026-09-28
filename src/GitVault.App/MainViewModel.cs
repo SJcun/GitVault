@@ -362,9 +362,12 @@ public partial class MainViewModel : ObservableObject
     /// <summary>优先刷新当前仓库及其详情，再逐个检查其他仓库；单个错误不阻止后续检查。</summary>
     private async Task RefreshRowsAsync(CancellationToken token)
     {
+        // 逐项显示项目名后，整轮结束仍恢复原任务的完成提示。
+        var completion = Feedback.EndsWith('…') ? Feedback[..^1] + "完成" : "刷新项目状态完成";
         var selected = SelectedItem;
         if (selected is not null)
         {
+            Feedback = $"正在刷新「{selected.Name}」的状态…";
             await RefreshRowAsync(selected, token);
             // 当前仓库完成检查后立即通知右侧详情，不等待其余仓库。
             UpdateDetails();
@@ -378,6 +381,7 @@ public partial class MainViewModel : ObservableObject
             {
                 if (!isRefreshingOtherRows) return;
                 if (item == selected) continue;
+                Feedback = $"正在刷新「{item.Name}」的状态…";
                 await RefreshRowAsync(item, token);
             }
             if (!isRefreshingOtherRows) return;
@@ -388,7 +392,7 @@ public partial class MainViewModel : ObservableObject
             UpdateDetails();
         }
         var failed = Items.Count(item => item.LocalPath is not null && item.Status is null);
-        if (failed > 0) Feedback = $"刷新完成，{failed} 个仓库检查失败 · 查看日志";
+        Feedback = failed > 0 ? $"刷新完成，{failed} 个仓库检查失败 · 查看日志" : completion;
     }
 
     /// <summary>失败立即清空同步缓存；错误在列表和日志中均可见。</summary>

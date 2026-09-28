@@ -94,13 +94,18 @@ public sealed class ImportDialogTests
             // 选中末尾项目时，先收到它的新状态，其他项目仍在等待检查。
             foreach (var item in viewModel.Items) item.Invalidate("等待刷新");
             var selectedUpdatedFirst = false;
+            var progress = new List<string>();
             viewModel.PropertyChanged += (_, args) =>
             {
                 if (args.PropertyName == nameof(MainViewModel.StatusText) && viewModel.SelectedItem?.Status is not null
                     && viewModel.Items[0].Status is null) selectedUpdatedFirst = true;
+                if (args.PropertyName == nameof(MainViewModel.Feedback) && viewModel.Feedback.StartsWith("正在刷新「"))
+                    progress.Add(viewModel.Feedback);
             };
             await viewModel.RecheckRowsAsync();
             Assert.True(selectedUpdatedFirst);
+            Assert.Equal(new[] { "正在刷新「新增项目」的状态…", "正在刷新「已有项目」的状态…" }, progress);
+            Assert.Equal("刷新项目状态完成", viewModel.Feedback);
             Assert.All(viewModel.Items, item => Assert.NotNull(item.Status));
 
             // 选中项目领先时，在其他项目检查期间就能请求推送，且推送确实执行。
