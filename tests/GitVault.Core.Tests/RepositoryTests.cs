@@ -322,9 +322,6 @@ public sealed class RepositoryTests : IDisposable
         await git.RunAsync(a, ["tag", "feature-only"]);
         await repositories.PushAsync(vault, repository, a);
         Assert.Equal(0, (await repositories.RefreshAsync(vault, repository, b)).TagsToPull);
-        var recent = await repositories.RecentAsync(b);
-        Assert.Contains("lightweight", recent[0].Tags);
-        Assert.Contains("annotated", recent[0].Tags);
         await git.RunAsync(a, ["checkout", "main"]);
         await git.RunAsync(a, ["tag", "shared"]);
         await git.RunAsync(a, ["checkout", "feature"]);

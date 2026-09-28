@@ -18,7 +18,10 @@ try {
             dotnet build GitVault.sln -c Release --nologo
         }
         'Test' {
-            dotnet test GitVault.sln -c Release --logger trx --results-directory artifacts/TestResults
+            # 依次运行核心与 WPF 测试，避免并行 Git 操作拖慢界面测试。
+            dotnet test tests/GitVault.Core.Tests/GitVault.Core.Tests.csproj -c Release --logger trx --results-directory artifacts/TestResults
+            if ($LASTEXITCODE -ne 0) { throw '核心测试失败。' }
+            dotnet test tests/GitVault.App.Tests/GitVault.App.Tests.csproj -c Release --logger trx --results-directory artifacts/TestResults
         }
         'Publish' {
             # 每次发布使用全新目录，避免把旧包中的内部文档或其他残留文件打包。
