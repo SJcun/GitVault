@@ -1,8 +1,8 @@
 # GitVault
 
-**用 U 盘，在不同 Windows 电脑之间同步 Git 提交。**
+**用 U 盘，作为Git仓库。**
 
-GitVault 是基于 **.NET 8 + WPF** 的桌面工具，将 U 盘上的标准 Git 裸仓库作为代码中转站。你仍在本机使用熟悉的 IDE 和 Git 工具开发、提交，再通过 GitVault 推送或拉取代码，无需配置 Git 托管服务。
+GitVault 是基于 **.NET 8 + WPF** 的桌面工具，在 U 盘上创建标准 Git 裸仓库作为代码中转站。你仍在本机使用熟悉的 IDE 和 Git 工具开发、提交，再通过 GitVault 推送或拉取代码，无需配置 Git 托管服务。
 
 ```text
 电脑 A 的工作目录           U 盘代码库             电脑 B 的工作目录
@@ -26,9 +26,9 @@ GitVault 是基于 **.NET 8 + WPF** 的桌面工具，将 U 盘上的标准 Git 
 
 | 项目 | 要求 |
 | --- | --- |
-| 系统 | Windows x64；已有 Windows 10 22H2 构建与进程启动验证，其他版本需在对应环境验证 |
-| Git | 本机安装 Git for Windows，或在“设置”中指定便携 Git 的 `git.exe` |
-| .NET | 使用自包含发布包时无需单独安装；从源码开发需要 .NET 8 SDK |
+| 系统 | Windows x64； |
+| Git | 本机安装 Git for Windows，或在“设置”中指定 `git.exe` |
+| .NET | 使用发布包时无需单独安装；从源码开发需要 .NET 8 SDK |
 | 本地项目 | 已初始化且至少有一次提交的 Git 工作区 |
 
 发布包不包含 Git。程序自身不连接 Git 托管平台；仓库配置的 Git hooks、过滤器及其外部依赖仍由本机 Git 执行。
