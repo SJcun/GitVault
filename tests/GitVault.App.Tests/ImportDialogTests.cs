@@ -91,6 +91,18 @@ public sealed class ImportDialogTests
             Assert.Equal("加入代码库完成", viewModel.Feedback);
             Assert.True(viewModel.CanUseVault);
 
+            // 选中末尾项目时，先收到它的新状态，其他项目仍在等待检查。
+            foreach (var item in viewModel.Items) item.Invalidate("等待刷新");
+            var selectedUpdatedFirst = false;
+            viewModel.PropertyChanged += (_, args) =>
+            {
+                if (args.PropertyName == nameof(MainViewModel.StatusText) && viewModel.SelectedItem?.Status is not null
+                    && viewModel.Items[0].Status is null) selectedUpdatedFirst = true;
+            };
+            await viewModel.RecheckRowsAsync();
+            Assert.True(selectedUpdatedFirst);
+            Assert.All(viewModel.Items, item => Assert.NotNull(item.Status));
+
             // 取消表单也必须释放保护，随后正常的窗口激活仍能刷新。
             _ = Application.Current.Dispatcher.BeginInvoke(DispatcherPriority.ApplicationIdle, new Action(() =>
                 Application.Current.Windows.OfType<Window>().Single(window => window.Title == "加入 U 盘代码库").DialogResult = false));

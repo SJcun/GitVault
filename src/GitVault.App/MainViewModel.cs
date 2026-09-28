@@ -350,11 +350,22 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanWork))]
     private Task RefreshAsync() => ExecuteAsync("刷新状态", token => current is null ? DiscoverCoreAsync(token) : LoadVaultAsync(current, token));
 
-    /// <summary>逐个检查仓库，单个错误不阻止其他仓库显示结果。</summary>
+    /// <summary>优先刷新当前仓库及其详情，再逐个检查其他仓库；单个错误不阻止后续检查。</summary>
     private async Task RefreshRowsAsync(CancellationToken token)
     {
-        foreach (var item in Items) await RefreshRowAsync(item, token);
+        var selected = SelectedItem;
+        if (selected is not null)
+        {
+            await RefreshRowAsync(selected, token);
+            // 当前仓库完成检查后立即通知右侧详情，不等待其余仓库。
+            UpdateDetails();
+        }
         await LoadCommitsAsync(token);
+        foreach (var item in Items)
+        {
+            if (item == selected) continue;
+            await RefreshRowAsync(item, token);
+        }
         var failed = Items.Count(item => item.LocalPath is not null && item.Status is null);
         if (failed > 0) Feedback = $"刷新完成，{failed} 个仓库检查失败 · 查看日志";
         UpdateDetails();
