@@ -106,6 +106,7 @@ public sealed class ImportDialogTests
             // 选中项目领先时，在其他项目检查期间就能请求推送，且推送确实执行。
             await git.RunAsync(local, ["-c", "user.name=Test", "-c", "user.email=test@example.invalid",
                 "commit", "--allow-empty", "-m", "待推送提交"]);
+            viewModel.Items[0].Invalidate("等待刷新");
             Task? queuedPush = null;
             viewModel.PropertyChanged += (_, args) =>
             {
@@ -115,6 +116,7 @@ public sealed class ImportDialogTests
             await viewModel.RecheckRowsAsync();
             Assert.NotNull(queuedPush);
             await queuedPush;
+            Assert.NotNull(viewModel.Items[0].Status);
             Assert.Equal(SyncKind.Synced, viewModel.SelectedItem?.Status?.Kind);
             Assert.Equal("推送到 U 盘完成", viewModel.Feedback);
 
@@ -125,6 +127,7 @@ public sealed class ImportDialogTests
             await git.RunAsync(otherLocal, ["-c", "user.name=Test", "-c", "user.email=test@example.invalid",
                 "commit", "--allow-empty", "-m", "远端提交"]);
             await transfers.PushAsync(vault, viewModel.SelectedItem.Repository, otherLocal);
+            viewModel.Items[0].Invalidate("等待刷新");
             Task? queuedPull = null;
             viewModel.PropertyChanged += (_, args) =>
             {
@@ -134,6 +137,7 @@ public sealed class ImportDialogTests
             await viewModel.RecheckRowsAsync();
             Assert.NotNull(queuedPull);
             await queuedPull;
+            Assert.NotNull(viewModel.Items[0].Status);
             Assert.Equal(SyncKind.Synced, viewModel.SelectedItem.Status?.Kind);
             Assert.Equal("从 U 盘拉取完成", viewModel.Feedback);
 

@@ -423,6 +423,7 @@ public partial class MainViewModel : ObservableObject
     private async Task TransferAsync(bool push)
     {
         var item = SelectedItem!;
+        var interruptedRefresh = isRefreshingOtherRows;
         if (isRefreshingOtherRows)
         {
             // 让当前检查结束后停止遍历，并等待串行任务释放执行权。
@@ -434,6 +435,7 @@ public partial class MainViewModel : ObservableObject
             if (!transferQueued) return;
             transferQueued = false;
         }
+        var transferCancelled = false;
         await ExecuteAsync(push ? "推送到 U 盘" : "从 U 盘拉取", async token =>
         {
             try
@@ -443,8 +445,21 @@ public partial class MainViewModel : ObservableObject
                 item.Apply(state);
                 await LoadCommitsAsync(token);
             }
+            catch (OperationCanceledException)
+            {
+                transferCancelled = true;
+                item.Invalidate("操作未完成 · 请刷新复核");
+                throw;
+            }
             catch { item.Invalidate("操作未完成 · 请刷新复核"); throw; }
         });
+        if (interruptedRefresh && !transferCancelled && CanUseVault)
+        {
+            // 传输结束后补齐被跳过的项目；检查失败时保留刷新错误提示。
+            var transferFeedback = Feedback;
+            await RecheckRowsAsync();
+            if (Feedback == "刷新项目状态完成") Feedback = transferFeedback;
+        }
     }
 
     /// <summary>登记清单写入失败后留下的完整裸仓库。</summary>
