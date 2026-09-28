@@ -489,7 +489,13 @@ public partial class MainViewModel : ObservableObject
         if (CanWork) await DiscoverAsync();
     }
 
-    /// <summary>窗口重新获得焦点时检查外部 Git 操作造成的状态变化。</summary>
+    /// <summary>窗口重新获得焦点时复查全部项目，更新未选中项目的侧栏状态。</summary>
+    public async Task RecheckRowsAsync()
+    {
+        if (CanUseVault) await ExecuteAsync("刷新项目状态", RefreshRowsAsync);
+    }
+
+    /// <summary>切换选中项目时复查该项目的状态和提交记录。</summary>
     public async Task RecheckSelectionAsync()
     {
         if (CanUseVault && SelectedItem?.LocalPath is not null)

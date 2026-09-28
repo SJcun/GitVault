@@ -23,7 +23,7 @@ public partial class MainWindow : Window
         Loaded += async (_, _) => { await viewModel.InitializeAsync(); initialized = true; };
         SourceInitialized += (_, _) => HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(WindowMessage);
         deviceTimer.Tick += async (_, _) => { deviceTimer.Stop(); await viewModel.DeviceChangedAsync(); };
-        Activated += async (_, _) => { if (initialized) await viewModel.RecheckSelectionAsync(); };
+        Activated += async (_, _) => { if (initialized) await viewModel.RecheckRowsAsync(); };
         Closing += OnClosing;
     }
 
