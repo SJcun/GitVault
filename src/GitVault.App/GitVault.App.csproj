@@ -11,6 +11,7 @@
     <ApplicationIcon>Assets/GitVault.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="GitVault.App.Tests" />
     <Resource Include="Assets/GitVault.ico" />
     <Resource Include="Assets/GitVault.png" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />

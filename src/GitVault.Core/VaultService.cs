@@ -84,15 +84,31 @@ public sealed class VaultService
     /// <summary>登记已完成的裸仓库；合并最新清单，不覆盖其他已登记项目。</summary>
     public VaultLocation Register(VaultLocation vault, VaultRepository repository)
     {
+        // 独占句柄覆盖完整读改写；锁文件保留，避免删除与重新创建之间的竞争。
+        using var manifestLock = AcquireManifestLock(vault.RootPath);
         var current = Open(vault.RootPath);
         if (current.Manifest.VaultId != vault.Manifest.VaultId) throw new IOException("代码库身份发生变化。");
         var path = RepositoryPath(current, repository);
         if (current.Manifest.Repositories.Any(r => r.RepoId == repository.RepoId ||
+            string.Equals(r.Name, repository.Name, StringComparison.OrdinalIgnoreCase) ||
             string.Equals(RepositoryPath(current, r), path, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException("此仓库已登记，请刷新。");
         current.Manifest.Repositories.Add(repository);
         SettingsService.WriteJson(Path.Combine(current.RootPath, "vault.json"), current.Manifest);
         return current;
+    }
+
+    /// <summary>立即取得跨进程清单锁；仅将文件共享冲突转换为可读的占用提示。</summary>
+    private static FileStream AcquireManifestLock(string root)
+    {
+        try
+        {
+            return new FileStream(Path.Combine(root, "vault.json.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        }
+        catch (IOException error) when ((error.HResult & 0xffff) is 32 or 33)
+        {
+            throw new IOException("代码库正在被其他进程更新，请稍后重试。", error);
+        }
     }
 
     /// <summary>检查已知路径以及移动磁盘默认位置，不递归扫描磁盘。</summary>

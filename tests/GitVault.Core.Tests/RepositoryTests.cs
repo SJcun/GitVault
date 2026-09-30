@@ -317,6 +317,25 @@ public sealed class RepositoryTests : IDisposable
         Assert.Equal(1, await repositories.RecoverAsync(vault));
     }
 
+    /// <summary>导入完成后登记遇锁失败，裸仓库与源提交保留，释放后可恢复且不重复登记。</summary>
+    [Fact]
+    public async Task ManifestLockFailureLeavesRecoverableRepository()
+    {
+        var a = await NewRepositoryAsync("A");
+        var vault = vaults.Create(Path.Combine(root, "vault"), "测试");
+        using (var manifestLock = new FileStream(Path.Combine(vault.RootPath, "vault.json.lock"),
+            FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+        {
+            var error = await Assert.ThrowsAsync<IOException>(() => repositories.ImportAsync(vault, a, "Recoverable"));
+            Assert.Contains("正在被其他进程更新", error.Message);
+            Assert.Empty(vaults.Open(vault.RootPath).Manifest.Repositories);
+            Assert.Equal(await HeadAsync(a), await HeadAsync(Path.Combine(vault.RootPath, "repos", "Recoverable.git")));
+        }
+        Assert.Equal(1, await repositories.RecoverAsync(vault));
+        Assert.Equal(0, await repositories.RecoverAsync(vaults.Open(vault.RootPath)));
+        Assert.Single(vaults.Open(vault.RootPath).Manifest.Repositories);
+    }
+
     /// <summary>导入包含所有本地分支与标签，后续推送不会改变其他分支。</summary>
     [Fact]
     public async Task ImportIncludesBranchesAndTagsAndPushUpdatesOnlyCurrentBranch()
