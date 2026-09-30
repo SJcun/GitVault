@@ -201,6 +201,61 @@ public sealed class RepositoryTests : IDisposable
         Assert.Contains("子模块", (await repositories.RefreshAsync(vault, repository, a)).Message);
     }
 
+    /// <summary>远端新增不支持的内容时，在快进和标签更新前拒绝，保留本地真实状态。</summary>
+    [Theory]
+    [InlineData(".gitattributes", "LFS")]
+    [InlineData("nested/.gitattributes", "LFS")]
+    [InlineData("nested", "子模块")]
+    public async Task UnsupportedPullTargetPreservesLocalState(string entry, string problem)
+    {
+        var (a, vault, repository) = await SeedAsync();
+        var b = Path.Combine(root, "B");
+        await repositories.CloneAsync(vault, repository, b);
+        await git.RunAsync(b, ["tag", "local-only"]);
+        var head = await HeadAsync(b);
+        var branch = (await git.RunAsync(b, ["symbolic-ref", "HEAD"])).Output;
+        var refs = (await git.RunAsync(b, ["show-ref", "--heads", "--tags"])).Output;
+        var index = (await git.RunAsync(b, ["ls-files", "--stage"])).Output;
+        var config = await File.ReadAllTextAsync(Path.Combine(b, ".git", "config"));
+        var content = await File.ReadAllTextAsync(Path.Combine(b, "initial.txt"));
+
+        // 用外部 Git 推送绕过应用的源内容保护，复现另一台电脑写入不支持提交的情况。
+        await CommitAsync(a, "initial.txt", "remote change");
+        if (problem == "LFS")
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.Combine(a, entry))!);
+            await CommitAsync(a, entry, "*.bin filter=lfs diff=lfs merge=lfs -text");
+        }
+        else
+        {
+            await git.RunAsync(a, ["update-index", "--add", "--cacheinfo", $"160000,{head},{entry}"]);
+            await CommitIndexAsync(a);
+        }
+        await git.RunAsync(a, ["tag", "incoming"]);
+        var remote = vaults.RepositoryPath(vault, repository);
+        await git.RunAsync(a, ["push", remote, "refs/heads/main:refs/heads/main", "refs/tags/incoming:refs/tags/incoming"]);
+        var remoteHead = await HeadAsync(remote);
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => repositories.PullAsync(vault, repository, b));
+
+        Assert.Contains(problem, error.Message);
+        Assert.Equal(head, await HeadAsync(b));
+        Assert.Equal(branch, (await git.RunAsync(b, ["symbolic-ref", "HEAD"])).Output);
+        Assert.Equal(refs, (await git.RunAsync(b, ["show-ref", "--heads", "--tags"])).Output);
+        Assert.Equal(index, (await git.RunAsync(b, ["ls-files", "--stage"])).Output);
+        Assert.Equal(config, await File.ReadAllTextAsync(Path.Combine(b, ".git", "config")));
+        Assert.Equal(content, await File.ReadAllTextAsync(Path.Combine(b, "initial.txt")));
+        Assert.False(Path.Exists(Path.Combine(b, entry)));
+        Assert.Empty((await git.RunAsync(b, ["status", "--porcelain=v1"])).Output);
+        Assert.Equal(remoteHead, await HeadAsync(remote));
+
+        // 克隆前也拒绝同样的目标内容，不创建最终目标目录。
+        var destination = Path.Combine(root, "unsupported-clone");
+        var cloneError = await Assert.ThrowsAsync<InvalidOperationException>(() => repositories.CloneAsync(vault, repository, destination));
+        Assert.Contains(problem, cloneError.Message);
+        Assert.False(Path.Exists(destination));
+    }
+
     /// <summary>远端拒绝推送时抛出实际 Git 错误，远端提交保持不变。</summary>
     [Fact]
     public async Task RejectedPushKeepsRemoteHead()

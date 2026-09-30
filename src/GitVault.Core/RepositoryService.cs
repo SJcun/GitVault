@@ -31,7 +31,8 @@ public sealed class RepositoryService(GitCommandService git, VaultService vaults
     {
         var source = vaults.VerifyRepository(vault, repository);
         await RequireBareAsync(source, token);
-        await RequireTransferContentsAsync(source, token);
+        var sourceHead = (await git.RunAsync(source, ["rev-parse", "--verify", "HEAD"], token)).Output.Trim();
+        await RequireTransferContentsAsync(source, sourceHead, token);
         destination = Path.GetFullPath(destination);
         if (Path.Exists(destination)) throw new IOException("克隆目标必须是不存在的新目录；已有项目请使用绑定。");
         var parent = Path.GetDirectoryName(destination) ?? throw new IOException("不能克隆到磁盘根目录。");
@@ -118,10 +119,13 @@ public sealed class RepositoryService(GitCommandService git, VaultService vaults
         if (state.Kind is not (SyncKind.Behind or SyncKind.Synced))
             throw new InvalidOperationException("当前状态不能快进拉取：" + state.Message);
         if (state.TagConflict is not null) throw new InvalidOperationException("同名标签指向不同对象，请先在 Git 工具中处理：" + state.TagConflict);
-        await EnsureUnchangedAsync(localPath, state, true, token);
         var source = vaults.VerifyRepository(vault, repository);
         var tags = await GetTagChangesAsync(localPath, source, state.Head, state.RemoteHead, token);
         if (tags.Conflict is not null) throw new InvalidOperationException("同名标签指向不同对象，请先在 Git 工具中处理：" + tags.Conflict);
+        // 检查已抓取的同一目标提交，再复核本地状态；拒绝发生在分支和标签更新之前。
+        if (state.Kind == SyncKind.Behind)
+            await RequireTransferContentsAsync(localPath, state.RemoteHead!, token);
+        await EnsureUnchangedAsync(localPath, state, true, token);
         if (state.Kind == SyncKind.Behind)
             await git.RunAsync(localPath, ["-c", "merge.autoStash=false", "-c", "core.logAllRefUpdates=true", "merge", "--ff-only", "--no-autostash", state.RemoteHead!], token);
         if (tags.Pull.Length > 0)
@@ -264,26 +268,26 @@ public sealed class RepositoryService(GitCommandService git, VaultService vaults
         else if (operation) problem = "存在未完成的 merge/rebase 等操作，请先在 Git 工具中处理。";
         else if ((await git.RunAsync(path, ["rev-parse", "--is-shallow-repository"], token)).Output.Trim() == "true")
             problem = "首版不支持浅克隆，请先补全历史。";
-        else problem = await TransferProblemAsync(path, token);
+        else problem = await TransferProblemAsync(path, head, token);
         return new LocalSnapshot(branch, head, dirty, operation, problem);
     }
 
-    /// <summary>拒绝只传输指针却遗漏实际内容的 LFS 与子模块项目。</summary>
-    private async Task<string?> TransferProblemAsync(string path, CancellationToken token)
+    /// <summary>检查指定提交，拒绝只传输指针却遗漏实际内容的 LFS 与子模块项目。</summary>
+    private async Task<string?> TransferProblemAsync(string path, string commitOid, CancellationToken token)
     {
-        var modules = await git.RunAsync(path, ["ls-tree", "-r", "HEAD"], token);
+        var modules = await git.RunAsync(path, ["ls-tree", "-r", commitOid], token);
         if (modules.Output.Split('\n').Any(line => line.StartsWith("160000 ", StringComparison.Ordinal)))
             return "首版不支持包含子模块的项目；子模块内容不会随裸仓库传输。";
-        var lfs = await git.RunAsync(path, ["grep", "-I", "-l", "-e", "filter[[:space:]]*=[[:space:]]*lfs", "HEAD", "--", ".gitattributes", ":(glob)**/.gitattributes"], token, check: false);
+        var lfs = await git.RunAsync(path, ["grep", "-I", "-l", "-e", "filter[[:space:]]*=[[:space:]]*lfs", commitOid, "--", ".gitattributes", ":(glob)**/.gitattributes"], token, check: false);
         if (lfs.ExitCode == 0) return "首版不支持 Git LFS 项目；LFS 实际文件需要单独迁移。";
         if (lfs.ExitCode != 1) throw new GitException("检查 Git LFS 属性", lfs);
         return null;
     }
 
-    /// <summary>在克隆前核实默认分支的额外内容依赖。</summary>
-    private async Task RequireTransferContentsAsync(string path, CancellationToken token)
+    /// <summary>在克隆或快进前核实指定提交的额外内容依赖。</summary>
+    private async Task RequireTransferContentsAsync(string path, string commitOid, CancellationToken token)
     {
-        var problem = await TransferProblemAsync(path, token);
+        var problem = await TransferProblemAsync(path, commitOid, token);
         if (problem is not null) throw new InvalidOperationException(problem);
     }
 
