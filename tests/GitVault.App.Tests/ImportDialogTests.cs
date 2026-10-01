@@ -10,6 +10,7 @@ using Xunit;
 namespace GitVault.App.Tests;
 
 /// <summary>在独立 WPF 线程中验证表单关闭与自动刷新之间的竞争。</summary>
+[Collection("WPF")]
 public sealed class ImportDialogTests
 {
     /// <summary>已有项目时关闭导入表单，自动刷新不能抢占用户确认的导入。</summary>
@@ -75,7 +76,7 @@ public sealed class ImportDialogTests
                 var inputs = panel.Children.OfType<DockPanel>().SelectMany(row => row.Children.OfType<TextBox>()).ToArray();
                 inputs[0].Text = local;
                 inputs[1].Text = "新增项目";
-                dialog.Closed += (_, _) => reactivation = viewModel.RecheckSelectionAsync();
+                dialog.Closed += (_, _) => reactivation = viewModel.WindowActivatedAsync();
                 panel.Children.OfType<StackPanel>().Single().Children.OfType<Button>().Single(button => button.IsDefault)
                     .RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
             }));
@@ -154,6 +155,7 @@ public sealed class ImportDialogTests
             await viewModel.RecheckSelectionAsync();
             Assert.Equal("刷新当前仓库完成", viewModel.Feedback);
             Assert.Equal(2, viewModel.Items.Count);
+            await RefreshSchedulingTests.VerifyTransferPriorityAsync(viewModel, git);
         }
         finally
         {

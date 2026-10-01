@@ -4,7 +4,7 @@ using Xunit;
 namespace GitVault.Core.Tests;
 
 /// <summary>使用真实 Git 和隔离临时目录验证数据传输，而不是模拟命令输出。</summary>
-public sealed class RepositoryTests : IDisposable
+public sealed partial class RepositoryTests : IDisposable
 {
     /// <summary>本测试独占的目录，包含中文、空格和 shell 特殊字符。</summary>
     private readonly string root = Path.Combine(Path.GetTempPath(), "GitVaultTests", Guid.NewGuid().ToString("N"), "中文 项目 & $ `");

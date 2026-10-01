@@ -23,7 +23,7 @@ public partial class MainWindow : Window
         Loaded += async (_, _) => { await viewModel.InitializeAsync(); initialized = true; };
         SourceInitialized += (_, _) => HwndSource.FromHwnd(new WindowInteropHelper(this).Handle)?.AddHook(WindowMessage);
         deviceTimer.Tick += async (_, _) => { deviceTimer.Stop(); await viewModel.DeviceChangedAsync(); };
-        Activated += async (_, _) => { if (initialized) await viewModel.RecheckRowsAsync(); };
+        Activated += async (_, _) => { if (initialized) await viewModel.WindowActivatedAsync(); };
         Closing += OnClosing;
     }
 
@@ -34,10 +34,10 @@ public partial class MainWindow : Window
         return 0;
     }
 
-    /// <summary>任务未结束时留在窗口，用户可显式取消并检查状态。</summary>
+    /// <summary>任务未结束时留在窗口；允许关闭时清空通知队列和节流等待。</summary>
     private void OnClosing(object? sender, CancelEventArgs e)
     {
-        if (!viewModel.IsBusy) { deviceTimer.Stop(); return; }
+        if (!viewModel.IsBusy) { deviceTimer.Stop(); viewModel.CancelCommand.Execute(null); return; }
         e.Cancel = true;
         viewModel.Feedback = "操作正在进行，请等待完成或先取消操作。";
     }

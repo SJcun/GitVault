@@ -28,6 +28,15 @@ public partial class MainViewModel : ObservableObject
     private bool isRefreshingOtherRows;
     /// <summary>传输已请求，阻止重复点击和其他任务插队。</summary>
     private bool transferQueued;
+    /// <summary>窗口激活至多保留一次复查，设备通知独立保留一次补扫。</summary>
+    private bool automaticRefreshPending;
+    private bool deviceScanPending;
+    /// <summary>唯一的自动刷新调度任务及取消源，防止事件堆积或关闭后继续刷新。</summary>
+    private Task? automaticRefreshTask;
+    private CancellationTokenSource? automaticRefreshCancellation;
+    /// <summary>自动复查开始时间使用单调时钟，窗口激活之间至少间隔两秒。</summary>
+    private long? lastAutomaticRefresh;
+    private static readonly TimeSpan AutomaticRefreshInterval = TimeSpan.FromSeconds(2);
     /// <summary>设置损坏时禁止后续保存，避免覆盖用户文件。</summary>
     private bool settingsAvailable;
 
@@ -357,7 +366,12 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>重新读取整个 Vault 和所有绑定状态。</summary>
     [RelayCommand(CanExecute = nameof(CanWork))]
-    private Task RefreshAsync() => ExecuteAsync("刷新状态", token => current is null ? DiscoverCoreAsync(token) : LoadVaultAsync(current, token));
+    private Task RefreshAsync()
+    {
+        // 手动刷新立即检查全部项目，同时消费此前积累的窗口复查请求。
+        automaticRefreshPending = false;
+        return ExecuteAsync("刷新状态", token => current is null ? DiscoverCoreAsync(token) : LoadVaultAsync(current, token));
+    }
 
     /// <summary>优先刷新当前仓库及其详情，再逐个检查其他仓库；单个错误不阻止后续检查。</summary>
     private async Task RefreshRowsAsync(CancellationToken token)
@@ -505,6 +519,9 @@ public partial class MainViewModel : ObservableObject
     private void Cancel()
     {
         transferQueued = false;
+        automaticRefreshPending = false;
+        deviceScanPending = false;
+        automaticRefreshCancellation?.Cancel();
         cancellation?.Cancel();
     }
 
@@ -552,6 +569,8 @@ public partial class MainViewModel : ObservableObject
             completed.SetResult();
             IsBusy = false;
             UpdateDetails();
+            // 先释放串行任务，再处理忙碌期间的通知；排队传输仍优先取得执行权。
+            _ = ProcessPendingRefreshesAsync();
         }
     }
 
@@ -563,13 +582,80 @@ public partial class MainViewModel : ObservableObject
         foreach (var commit in await repositories.RecentAsync(path, token)) Commits.Add(commit);
     }
 
-    /// <summary>设备通知只触发发现，不在忙碌时并行启动 Git。</summary>
-    public async Task DeviceChangedAsync()
+    /// <summary>设备通知合并为一次扫描，忙碌时保留通知，任务结束后补扫。</summary>
+    public Task DeviceChangedAsync()
     {
-        if (CanWork) await DiscoverAsync();
+        if (!settingsAvailable || cancellation?.IsCancellationRequested == true) return Task.CompletedTask;
+        deviceScanPending = true;
+        return ProcessPendingRefreshesAsync();
     }
 
-    /// <summary>窗口重新获得焦点时复查全部项目，更新未选中项目的侧栏状态。</summary>
+    /// <summary>窗口激活请求短间隔复查；模态输入期间不抢占用户操作。</summary>
+    public Task WindowActivatedAsync()
+    {
+        if (!settingsAvailable || Dialogs.IsOpen || current is null || !IsOnline
+            || cancellation?.IsCancellationRequested == true) return Task.CompletedTask;
+        automaticRefreshPending = true;
+        return ProcessPendingRefreshesAsync();
+    }
+
+    /// <summary>只启动一个通知处理任务；忙碌或传输排队时由任务结束入口继续处理。</summary>
+    private Task ProcessPendingRefreshesAsync()
+    {
+        if (automaticRefreshTask is not null) return automaticRefreshTask;
+        if ((!automaticRefreshPending && !deviceScanPending) || IsBusy || transferQueued) return Task.CompletedTask;
+        var source = new CancellationTokenSource();
+        automaticRefreshCancellation = source;
+        automaticRefreshTask = DrainPendingRefreshesAsync(source);
+        return automaticRefreshTask;
+    }
+
+    /// <summary>串行消费自动复查和设备扫描，扫描包含全量刷新，优先于窗口复查。</summary>
+    private async Task DrainPendingRefreshesAsync(CancellationTokenSource source)
+    {
+        // 先让调用方保存任务引用，避免同步结束后留下已完成的任务而无法再次调度。
+        await Task.Yield();
+        try
+        {
+            while ((automaticRefreshPending || deviceScanPending) && !source.IsCancellationRequested)
+            {
+                if (IsBusy || transferQueued) return;
+                if (Dialogs.IsOpen)
+                {
+                    await Task.Delay(100, source.Token);
+                    continue;
+                }
+                if (deviceScanPending)
+                {
+                    deviceScanPending = false;
+                    automaticRefreshPending = false;
+                    await DiscoverAsync();
+                    continue;
+                }
+                if (!CanUseVault) { automaticRefreshPending = false; return; }
+                var remaining = lastAutomaticRefresh is { } started
+                    ? AutomaticRefreshInterval - Stopwatch.GetElapsedTime(started) : TimeSpan.Zero;
+                if (remaining > TimeSpan.Zero)
+                {
+                    await Task.Delay(remaining, source.Token);
+                    // 等待期间可能收到设备通知、手动刷新或传输，重新判断优先级与待办标记。
+                    continue;
+                }
+                automaticRefreshPending = false;
+                lastAutomaticRefresh = Stopwatch.GetTimestamp();
+                await RecheckRowsAsync();
+            }
+        }
+        catch (OperationCanceledException) when (source.IsCancellationRequested) { }
+        finally
+        {
+            automaticRefreshTask = null;
+            automaticRefreshCancellation = null;
+            source.Dispose();
+        }
+    }
+
+    /// <summary>即时复查全部项目，也用于传输结束后补齐被中断的检查。</summary>
     public async Task RecheckRowsAsync()
     {
         if (CanUseVault) await ExecuteAsync("刷新项目状态", RefreshRowsAsync);

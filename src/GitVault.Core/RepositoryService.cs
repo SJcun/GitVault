@@ -3,6 +3,9 @@ namespace GitVault.Core;
 /// <summary>封装离线仓库传输流程；调用方串行执行，避免同一工作目录相互竞争。</summary>
 public sealed class RepositoryService(GitCommandService git, VaultService vaults)
 {
+    /// <summary>按规范化路径保留每个仓库最近三个提交的内容检查；不缓存动态状态或读取失败。</summary>
+    private readonly Dictionary<string, List<(string Oid, string? Problem)>> contentChecks = new(StringComparer.OrdinalIgnoreCase);
+
     /// <summary>将本地分支和标签复制成裸仓库；失败目录保留以便检查。</summary>
     public async Task<VaultRepository> ImportAsync(VaultLocation vault, string localPath, string name, CancellationToken token = default)
     {
@@ -73,13 +76,19 @@ public sealed class RepositoryService(GitCommandService git, VaultService vaults
         }
         if (remote.ExitCode != 0) throw new GitException("读取 U 盘缓存分支", remote);
         var remoteHead = remote.Output.Trim();
-        var common = await git.RunAsync(localPath, ["merge-base", local.Head, remoteHead], token, check: false);
-        if (common.ExitCode == 1) return Status(local, remoteHead, 0, 0, SyncKind.Unrelated, "两个分支没有共同历史");
-        if (common.ExitCode != 0) throw new GitException("检查共同历史", common);
-        var counts = (await git.RunAsync(localPath, ["rev-list", "--left-right", "--count", $"{local.Head}...{remoteHead}"], token)).Output
-            .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-        var ahead = int.Parse(counts[0]);
-        var behind = int.Parse(counts[1]);
+        var ahead = 0;
+        var behind = 0;
+        // 同一对象必然已同步；标签仍独立读取，不能用提交相同推断标签没有变化。
+        if (local.Head != remoteHead)
+        {
+            var common = await git.RunAsync(localPath, ["merge-base", local.Head, remoteHead], token, check: false);
+            if (common.ExitCode == 1) return Status(local, remoteHead, 0, 0, SyncKind.Unrelated, "两个分支没有共同历史");
+            if (common.ExitCode != 0) throw new GitException("检查共同历史", common);
+            var counts = (await git.RunAsync(localPath, ["rev-list", "--left-right", "--count", $"{local.Head}...{remoteHead}"], token)).Output
+                .Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+            ahead = int.Parse(counts[0]);
+            behind = int.Parse(counts[1]);
+        }
         var kind = (ahead, behind) switch
         {
             (0, 0) => SyncKind.Synced, (> 0, 0) => SyncKind.Ahead,
@@ -256,12 +265,11 @@ public sealed class RepositoryService(GitCommandService git, VaultService vaults
         var headResult = await git.RunAsync(path, ["rev-parse", "--verify", "--quiet", "HEAD"], token, check: false);
         var head = headResult.Output.Trim();
         var dirty = (await git.RunAsync(path, ["status", "--porcelain=v1", "-z", "--untracked-files=normal"], token)).Output.Length > 0;
-        var operation = false;
-        foreach (var marker in new[] { "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply", "sequencer" })
-        {
-            var markerPath = (await git.RunAsync(path, ["rev-parse", "--git-path", marker], token)).Output.Trim();
-            operation |= Path.Exists(Path.GetFullPath(markerPath, Path.GetFullPath(path)));
-        }
+        // 一次查询取得全部标记路径，仍由 Git 定位，以兼容 linked worktree 的独立管理目录。
+        var markers = await git.RunAsync(path, ["rev-parse", "--git-path", "MERGE_HEAD", "--git-path", "CHERRY_PICK_HEAD",
+            "--git-path", "REVERT_HEAD", "--git-path", "rebase-merge", "--git-path", "rebase-apply", "--git-path", "sequencer"], token);
+        var operation = markers.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(marker => Path.Exists(Path.GetFullPath(marker, selected)));
         string? problem = null;
         if (headResult.ExitCode != 0) problem = "尚未创建首次提交，请先在 Git 工具中提交。";
         else if (branchResult.ExitCode != 0) problem = "HEAD 未附着到分支，请先切换到本地分支。";
@@ -272,8 +280,26 @@ public sealed class RepositoryService(GitCommandService git, VaultService vaults
         return new LocalSnapshot(branch, head, dirty, operation, problem);
     }
 
-    /// <summary>检查指定提交，拒绝只传输指针却遗漏实际内容的 LFS 与子模块项目。</summary>
+    /// <summary>复用同一仓库和完整提交 OID 的检查结果；取消、Git 错误与读取失败不进入缓存。</summary>
     private async Task<string?> TransferProblemAsync(string path, string commitOid, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        var key = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        if (contentChecks.TryGetValue(key, out var entries))
+        {
+            var index = entries.FindIndex(entry => entry.Oid == commitOid);
+            if (index >= 0) return entries[index].Problem;
+        }
+        var problem = await ReadTransferProblemAsync(path, commitOid, token);
+        token.ThrowIfCancellationRequested();
+        if (entries is null) contentChecks[key] = entries = [];
+        if (entries.Count == 3) entries.RemoveAt(0);
+        entries.Add((commitOid, problem));
+        return problem;
+    }
+
+    /// <summary>检查指定提交，拒绝只传输指针却遗漏实际内容的 LFS 与子模块项目。</summary>
+    private async Task<string?> ReadTransferProblemAsync(string path, string commitOid, CancellationToken token)
     {
         var modules = await git.RunAsync(path, ["ls-tree", "-r", commitOid], token);
         if (modules.Output.Split('\n').Any(line => line.StartsWith("160000 ", StringComparison.Ordinal)))
