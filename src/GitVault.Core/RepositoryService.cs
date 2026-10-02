@@ -172,26 +172,60 @@ public sealed class RepositoryService(GitCommandService git, VaultService vaults
             }).ToList();
     }
 
-    /// <summary>恢复已创建但清单登记失败的完整裸仓库；忽略导入临时目录。</summary>
-    public async Task<int> RecoverAsync(VaultLocation vault, CancellationToken token = default)
+    /// <summary>逐项恢复完整裸仓库；候选错误继续，清单、身份和登记失败立即中止。</summary>
+    public async Task<RecoveryResult> RecoverAsync(VaultLocation vault, CancellationToken token = default)
     {
-        var current = vaults.Open(vault.RootPath);
-        if (current.Manifest.VaultId != vault.Manifest.VaultId) throw new IOException("代码库身份发生变化。");
+        var current = OpenRecoveryVault(vault);
         var count = 0;
-        foreach (var path in Directory.EnumerateDirectories(Path.Combine(current.RootPath, "repos"), "*.git"))
+        var skipped = 0;
+        var failures = new List<RecoveryFailure>();
+        // 先取得本轮候选快照，避免登记产生的清单文件影响遍历。
+        var paths = Directory.GetDirectories(Path.Combine(current.RootPath, "repos"), "*.git");
+        foreach (var path in paths)
         {
-            var relative = Path.GetRelativePath(current.RootPath, path);
-            if (current.Manifest.Repositories.Any(r => string.Equals(vaults.RepositoryPath(current, r), path, StringComparison.OrdinalIgnoreCase))) continue;
-            var entry = new VaultRepository { Name = Path.GetFileNameWithoutExtension(path), RelativePath = relative };
-            vaults.RepositoryPath(current, entry);
-            await RequireBareAsync(path, token);
-            await git.RunAsync(path, ["fsck", "--connectivity-only"], token);
+            if (token.IsCancellationRequested) return new(count, skipped, failures, true);
+            current = OpenRecoveryVault(vault);
+            if (current.Manifest.Repositories.Any(r => string.Equals(vaults.RepositoryPath(current, r), path, StringComparison.OrdinalIgnoreCase)))
+            {
+                skipped++;
+                continue;
+            }
+            if (Path.GetFileName(path).StartsWith(".import-", StringComparison.OrdinalIgnoreCase)) continue;
+            var entry = new VaultRepository { Name = Path.GetFileNameWithoutExtension(path), RelativePath = Path.GetRelativePath(current.RootPath, path) };
+            try
+            {
+                ValidateName(entry.Name);
+                vaults.RepositoryPath(current, entry);
+                await RequireBareAsync(path, token);
+                await git.RunAsync(path, ["fsck", "--connectivity-only"], token);
+            }
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
+            {
+                return new(count, skipped, failures, true);
+            }
+            catch (Exception error) when (error is GitException or IOException or InvalidDataException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                // 先重查全局状态；拔盘、身份替换和清单损坏不能伪装成单项目失败。
+                OpenRecoveryVault(vault);
+                failures.Add(new(path, error.Message));
+                continue;
+            }
+            if (token.IsCancellationRequested) return new(count, skipped, failures, true);
+            // 登记失败属于全局写入故障，不能吞掉后继续处理其他候选。
             current = vaults.Register(current, entry);
             count++;
         }
-        return count;
+        return new(count, skipped, failures, false);
     }
 
+    /// <summary>恢复每个候选前后检查清单身份及 repos 根目录，全局异常原样上报。</summary>
+    private VaultLocation OpenRecoveryVault(VaultLocation expected)
+    {
+        var current = vaults.Open(expected.RootPath);
+        if (current.Manifest.VaultId != expected.Manifest.VaultId) throw new IOException("代码库身份发生变化。");
+        if (!Directory.Exists(Path.Combine(current.RootPath, "repos"))) throw new DirectoryNotFoundException("代码库的 repos 目录不存在。");
+        return current;
+    }
     /// <summary>按提交可达性找出当前分支相关标签，并以原始引用对象识别同名冲突。</summary>
     private async Task<TagChanges> GetTagChangesAsync(string localPath, string remotePath, string localHead, string? remoteHead, CancellationToken token)
     {

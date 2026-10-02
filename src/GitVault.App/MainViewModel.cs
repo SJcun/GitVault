@@ -503,9 +503,17 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanUseVault))]
     private Task RecoverAsync() => ExecuteAsync("恢复仓库列表", async token =>
     {
-        var count = await repositories.RecoverAsync(current!, token);
-        AppendLog($"恢复登记 {count} 个仓库。");
-        await LoadVaultAsync(current!, token);
+        var result = await repositories.RecoverAsync(current!, token);
+        foreach (var failure in result.Failures) AppendLog(failure.Path + ": " + failure.Message);
+        var summary = $"{(result.Cancelled ? "恢复已取消" : "恢复完成")}：登记 {result.Recovered} 个、跳过 {result.Skipped} 个、失败 {result.Failures.Count} 个。";
+        AppendLog(summary);
+        if (result.Failures.Count > 0) IsLogOpen = true;
+        if (result.Cancelled)
+        {
+            foreach (var item in Items) item.Invalidate("恢复已取消 · 请刷新复核");
+        }
+        else await LoadVaultAsync(current!, token);
+        Feedback = summary;
     });
 
     /// <summary>设置 Git 路径并先执行版本检查。</summary>

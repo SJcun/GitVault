@@ -89,3 +89,15 @@ public sealed class GitException(string command, GitResult result)
     /// <summary>原始 Git 执行结果。</summary>
     public GitResult Result { get; } = result;
 }
+
+/// <summary>一次恢复的实际结果；失败条目保留原目录，取消保留已登记的项目。</summary>
+/// <param name="Recovered">本轮成功登记的仓库数量。</param>
+/// <param name="Skipped">已经登记而跳过的仓库数量。</param>
+/// <param name="Failures">候选验证失败的路径与诊断。</param>
+/// <param name="Cancelled">取消时为 true，之前的登记结果保留。</param>
+public sealed record RecoveryResult(int Recovered, int Skipped, IReadOnlyList<RecoveryFailure> Failures, bool Cancelled);
+
+/// <summary>单个候选仓库的失败路径和原始诊断。</summary>
+/// <param name="Path">失败候选的完整目录路径。</param>
+/// <param name="Message">原始失败原因。</param>
+public sealed record RecoveryFailure(string Path, string Message);

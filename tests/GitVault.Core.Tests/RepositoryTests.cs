@@ -292,11 +292,11 @@ public sealed partial class RepositoryTests : IDisposable
         var vault = vaults.Create(Path.Combine(root, "vault"), "测试");
         var orphan = Path.Combine(vault.RootPath, "repos", "Orphan.git");
         await git.RunAsync(null, ["clone", "--bare", "--no-hardlinks", a, orphan]);
-        Assert.Equal(1, await repositories.RecoverAsync(vault));
+        Assert.Equal(1, (await repositories.RecoverAsync(vault)).Recovered);
         var current = vaults.Open(vault.RootPath);
         Assert.Single(current.Manifest.Repositories);
         Assert.Equal(await HeadAsync(a), await HeadAsync(orphan));
-        Assert.Equal(0, await repositories.RecoverAsync(current));
+        Assert.Equal(0, (await repositories.RecoverAsync(current)).Recovered);
     }
 
     /// <summary>模拟清单只读导致的真实登记失败，源项目和已完成的裸仓库均保留。</summary>
@@ -314,7 +314,7 @@ public sealed partial class RepositoryTests : IDisposable
             Assert.Equal(await HeadAsync(a), await HeadAsync(Path.Combine(vault.RootPath, "repos", "Recoverable.git")));
         }
         finally { File.SetAttributes(manifest, FileAttributes.Normal); }
-        Assert.Equal(1, await repositories.RecoverAsync(vault));
+        Assert.Equal(1, (await repositories.RecoverAsync(vault)).Recovered);
     }
 
     /// <summary>导入完成后登记遇锁失败，裸仓库与源提交保留，释放后可恢复且不重复登记。</summary>
@@ -331,8 +331,8 @@ public sealed partial class RepositoryTests : IDisposable
             Assert.Empty(vaults.Open(vault.RootPath).Manifest.Repositories);
             Assert.Equal(await HeadAsync(a), await HeadAsync(Path.Combine(vault.RootPath, "repos", "Recoverable.git")));
         }
-        Assert.Equal(1, await repositories.RecoverAsync(vault));
-        Assert.Equal(0, await repositories.RecoverAsync(vaults.Open(vault.RootPath)));
+        Assert.Equal(1, (await repositories.RecoverAsync(vault)).Recovered);
+        Assert.Equal(0, (await repositories.RecoverAsync(vaults.Open(vault.RootPath))).Recovered);
         Assert.Single(vaults.Open(vault.RootPath).Manifest.Repositories);
     }
 
