@@ -10,6 +10,8 @@ $env:DOTNET_CLI_HOME = Join-Path $projectRoot 'artifacts\dotnet-home'
 $env:NUGET_PACKAGES = Join-Path $projectRoot 'artifacts\nuget'
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 $env:DOTNET_SKIP_FIRST_TIME_EXPERIENCE = '1'
+# WPF 构建不需要 HTTPS 开发证书，避免全新 CLI 目录初始化时安装证书。
+$env:DOTNET_GENERATE_ASPNET_CERTIFICATE = 'false'
 Push-Location $projectRoot
 try {
     # 构建与测试固定使用 global.json 指定的 .NET 8 SDK。

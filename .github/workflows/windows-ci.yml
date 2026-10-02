@@ -1,0 +1,61 @@
+name: Windows build and tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_GENERATE_ASPNET_CERTIFICATE: 'false'
+
+jobs:
+  test:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: 拉取完整源码
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: 准备兼容 global.json 的 .NET 8 SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: 记录实际 SDK 与 Git 版本
+        run: |
+          dotnet --info
+          git --version
+          New-Item -ItemType Directory -Path artifacts -Force | Out-Null
+
+      # 沿用项目入口；脚本的失败退出码会使工作流失败。
+      - name: Release 构建
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\build.ps1 -Task Build *>&1 | Tee-Object -FilePath artifacts/ci-build.log
+
+      - name: 顺序运行核心与 WPF 回归
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & .\build.ps1 -Task Test *>&1 | Tee-Object -FilePath artifacts/ci-test.log
+
+      # 即使测试失败也保存诊断；只上传隔离测试结果与构建日志。
+      - name: 保存测试结果和受控日志
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-test-results
+          path: |
+            artifacts/TestResults/*.trx
+            artifacts/ci-*.log
+          if-no-files-found: warn
+          retention-days: 14
