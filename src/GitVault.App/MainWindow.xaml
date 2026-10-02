@@ -53,6 +53,7 @@
                     <TextBlock Text="{Binding ConnectionText}" Foreground="{StaticResource Accent}" VerticalAlignment="Center" />
                 </StackPanel>
                 <Button Content="扫描 U 盘" Command="{Binding DiscoverCommand}" Tag="{StaticResource IconScan}" />
+                <Button Content="恢复本机设置" Command="{Binding RecoverSettingsCommand}" Visibility="{Binding ShowSettingsRecovery, Converter={StaticResource BoolVisibility}}" Tag="{StaticResource IconSettings}" />
                 <Button Content="刷新" Command="{Binding RefreshCommand}" Tag="{StaticResource IconRefresh}" Margin="0" />
             </StackPanel>
         </Grid>

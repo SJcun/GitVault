@@ -33,11 +33,11 @@ public sealed record VaultLocation(string RootPath, VaultManifest Manifest);
 public sealed class AppSettings
 {
     /// <summary>Git 可执行文件路径，默认从 PATH 查找。</summary>
-    public string GitPath { get; set; } = "git";
+    [JsonRequired] public string GitPath { get; set; } = "git";
     /// <summary>曾经手动打开的 Vault 位置。</summary>
-    public List<string> KnownVaultPaths { get; set; } = [];
+    [JsonRequired] public List<string> KnownVaultPaths { get; set; } = [];
     /// <summary>当前电脑的工作目录绑定。</summary>
-    public List<RepositoryBinding> Bindings { get; set; } = [];
+    [JsonRequired] public List<RepositoryBinding> Bindings { get; set; } = [];
 }
 
 /// <summary>以双重标识绑定本机工作目录。</summary>

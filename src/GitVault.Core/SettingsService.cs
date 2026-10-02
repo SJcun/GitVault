@@ -15,17 +15,39 @@ public sealed class SettingsService(string? directory = null)
     public AppSettings Load()
     {
         var path = Path.Combine(DirectoryPath, "settings.json");
-        if (!File.Exists(path)) return new AppSettings();
-        var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(path), JsonOptions)
-            ?? throw new InvalidDataException("本机设置为空，请检查 settings.json。");
-        if (string.IsNullOrWhiteSpace(settings.GitPath) || settings.Bindings is null || settings.KnownVaultPaths is null)
-            throw new InvalidDataException("本机设置字段不完整，请检查 settings.json。");
-        return settings;
+        if (!File.Exists(path))
+        {
+            if (File.Exists(path + ".bak")) throw new InvalidDataException("本机设置缺失，检测到备份；请明确选择恢复。");
+            return new AppSettings();
+        }
+        return JsonFile.Read<AppSettings>(path, Validate);
     }
 
-    /// <summary>保存本机设置。</summary>
-    public void Save(AppSettings settings) => WriteJson(Path.Combine(DirectoryPath, "settings.json"), settings);
+    /// <summary>保存完整有效设置，并保留上一有效版本。</summary>
+    public void Save(AppSettings settings) => JsonFile.Write(Path.Combine(DirectoryPath, "settings.json"), settings, Validate);
 
+    /// <summary>只检查备份，不修改主文件，供用户确认绑定和 Git 路径。</summary>
+    public AppSettings ReadBackup() => JsonFile.Read<AppSettings>(Path.Combine(DirectoryPath, "settings.json.bak"), Validate);
+
+    /// <summary>用户明确同意后恢复；损坏原文件另存，备份原样保留。</summary>
+    public AppSettings RestoreBackup() => JsonFile.Restore<AppSettings>(Path.Combine(DirectoryPath, "settings.json"), Validate);
+
+    /// <summary>路径不要求在线，但格式、绑定身份和同一项目的唯一性必须有效。</summary>
+    internal static void Validate(AppSettings settings)
+    {
+        if (string.IsNullOrWhiteSpace(settings.GitPath) || settings.Bindings is null || settings.KnownVaultPaths is null)
+            throw new InvalidDataException("本机设置字段不完整，请检查 settings.json。");
+        if (settings.KnownVaultPaths.Any(path => string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path)))
+            throw new InvalidDataException("本机设置的代码库路径必须是完整路径。");
+        var ids = new HashSet<(Guid Vault, Guid Repository)>();
+        foreach (var binding in settings.Bindings)
+        {
+            if (binding is null || binding.VaultId == Guid.Empty || binding.RepoId == Guid.Empty
+                || string.IsNullOrWhiteSpace(binding.LocalPath) || !Path.IsPathFullyQualified(binding.LocalPath)
+                || !ids.Add((binding.VaultId, binding.RepoId)))
+                throw new InvalidDataException("本机设置的仓库绑定无效或重复。");
+        }
+    }
     /// <summary>共同使用的可读 JSON 格式，直接保留中文等 Unicode 文字，必要的 JSON 字符仍会转义。</summary>
     internal static JsonSerializerOptions JsonOptions { get; } = new()
     {
@@ -34,12 +56,4 @@ public sealed class SettingsService(string? directory = null)
         Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
     };
 
-    /// <summary>先完整写入临时文件，再替换目标；异常时保留原文件。</summary>
-    internal static void WriteJson<T>(string path, T value)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        File.WriteAllText(temporary, JsonSerializer.Serialize(value, JsonOptions));
-        File.Move(temporary, path, overwrite: true);
-    }
 }

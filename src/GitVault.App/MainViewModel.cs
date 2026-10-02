@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Data;
 using System.Windows.Threading;
@@ -87,8 +88,9 @@ public partial class MainViewModel : ObservableObject
     public MainViewModel() : this(null) { }
 
     /// <summary>测试慢写入时可注入同一日志服务，不增加生产配置项。</summary>
-    internal MainViewModel(BufferedLog? bufferedLog)
+    internal MainViewModel(BufferedLog? bufferedLog, SettingsService? isolatedSettings = null)
     {
+        settingsStore = isolatedSettings ?? settingsStore;
         repositories = new RepositoryService(git, vaults);
         FilteredItems = CollectionViewSource.GetDefaultView(Items);
         FilteredItems.Filter = item => item is RepositoryItem row && row.Name.Contains(Search, StringComparison.OrdinalIgnoreCase);
@@ -98,6 +100,10 @@ public partial class MainViewModel : ObservableObject
         git.Log = AppendLog;
     }
 
+    /// <summary>设置损坏时只开放明确恢复入口，普通操作继续保持受控。</summary>
+    public bool CanRecoverSettings => !isClosing && !IsBusy && !transferQueued && !settingsAvailable && !Dialogs.IsOpen;
+    /// <summary>仅在设置不可用时显示恢复按钮。</summary>
+    public bool ShowSettingsRecovery => !settingsAvailable;
     /// <summary>普通命令是否可执行。</summary>
     public bool CanWork => !isClosing && !IsBusy && !transferQueued && settingsAvailable && !Dialogs.IsOpen;
     /// <summary>操作 Vault 需要有效连接。</summary>
@@ -167,9 +173,8 @@ public partial class MainViewModel : ObservableObject
         }
         catch (Exception error)
         {
-            Feedback = "本机设置读取失败，请修复后重启。";
-            Dialogs.Error(error.Message + "\n" + settingsStore.DirectoryPath);
-            return;
+            settingsAvailable = false;
+            if (!RestoreSettingsWithConfirmation(error.Message)) return;
         }
         await ExecuteAsync("检查环境", async token =>
         {
@@ -178,6 +183,71 @@ public partial class MainViewModel : ObservableObject
         });
     }
 
+    /// <summary>设置恢复在普通操作被禁用时仍可使用，确认后重新初始化环境。</summary>
+    [RelayCommand(CanExecute = nameof(CanRecoverSettings))]
+    private async Task RecoverSettingsAsync()
+    {
+        if (RestoreSettingsWithConfirmation("本机设置当前不可用。")) await InitializeAsync();
+    }
+
+    /// <summary>展示有效备份的 Git 路径和绑定数量，用户取消时不修改任何文件。</summary>
+    private bool RestoreSettingsWithConfirmation(string reason)
+    {
+        try
+        {
+            var backup = settingsStore.ReadBackup();
+            Feedback = "本机设置不可用，检测到有效备份。";
+            UpdateDetails();
+            if (!Dialogs.Confirm("恢复本机设置", reason + $"\n\n检测到备份：Git 为 {backup.GitPath}，包含 {backup.Bindings.Count} 个本机绑定。"
+                + "\n备份可能较旧。恢复会替换当前设置，并另存原文件。", "恢复备份"))
+            {
+                Feedback = "本机设置尚未恢复；普通操作已暂停，可通过“恢复本机设置”重试。";
+                return false;
+            }
+            settings = settingsStore.RestoreBackup();
+            settingsAvailable = true;
+            git.GitPath = settings.GitPath;
+            AppendLog("已从有效备份恢复本机设置；原文件副本保留在设置目录。");
+            return true;
+        }
+        catch (Exception error)
+        {
+            Feedback = "本机设置读取或恢复失败，普通操作已暂停。";
+            Dialogs.Error(reason + "\n" + error.Message + "\n" + settingsStore.DirectoryPath);
+            return false;
+        }
+        finally { UpdateDetails(); }
+    }
+
+    /// <summary>读取失败时仅在明确确认后恢复同一身份的备份，并使用逐项恢复补齐旧清单。</summary>
+    internal async Task<VaultLocation?> ReadVaultWithRecoveryAsync(string root, Guid? expectedId, CancellationToken token)
+    {
+        try { return vaults.Open(root); }
+        catch (Exception error) when (error is IOException or InvalidDataException or JsonException or UnauthorizedAccessException)
+        {
+            VaultLocation backup;
+            try { backup = vaults.ReadBackup(root, expectedId); }
+            catch (Exception backupError)
+            {
+                throw new InvalidDataException(error.Message + "\n没有可用的代码库备份：" + backupError.Message, error);
+            }
+            if (!Dialogs.Confirm("恢复代码库信息", $"{root}\n当前代码库信息无法读取：{error.Message}"
+                + $"\n\n有效备份为“{backup.Manifest.Name}”，登记了 {backup.Manifest.Repositories.Count} 个项目。"
+                + "\n恢复后将检查仓库目录并补登记完整项目；旧备份缺少的项目可能需要重新绑定。原文件会另存。", "恢复并检查仓库"))
+            {
+                Feedback = "代码库信息尚未恢复，原文件和备份保持原样。";
+                return null;
+            }
+            token.ThrowIfCancellationRequested();
+            var restored = vaults.RestoreBackup(root, expectedId ?? backup.Manifest.VaultId);
+            var result = await repositories.RecoverAsync(restored, token);
+            AppendLog($"备份恢复后检查：登记 {result.Recovered} 个、跳过 {result.Skipped} 个、失败 {result.Failures.Count} 个。");
+            foreach (var failure in result.Failures) AppendLog(failure.Path + ": " + failure.Message);
+            if (result.Failures.Count > 0) IsLogOpen = true;
+            if (result.Cancelled) throw new OperationCanceledException(token);
+            return vaults.Open(root);
+        }
+    }
     /// <summary>重新发现 U 盘设备，不对相同身份的多个位置作隐式选择。</summary>
     [RelayCommand(CanExecute = nameof(CanWork))]
     private Task DiscoverAsync() => ExecuteAsync("扫描 U 盘", DiscoverCoreAsync);
@@ -233,7 +303,13 @@ public partial class MainViewModel : ObservableObject
                     await CreateLibraryAtAsync(path);
                 return;
             default:
-                await ExecuteAsync("打开代码库", token => LoadVaultAsync(vaults.Open(path), token));
+                await ExecuteAsync("打开代码库", async token =>
+                {
+                    var expected = current is not null && string.Equals(current.RootPath, Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase)
+                        ? current.Manifest.VaultId : (Guid?)null;
+                    var location = await ReadVaultWithRecoveryAsync(path, expected, token);
+                    if (location is not null) await LoadVaultAsync(location, token);
+                });
                 return;
         }
     }
@@ -292,7 +368,8 @@ public partial class MainViewModel : ObservableObject
     private async Task LoadVaultAsync(VaultLocation location, CancellationToken token)
     {
         var selectedId = SelectedItem?.Repository.RepoId;
-        var loaded = vaults.Open(location.RootPath);
+        var loaded = await ReadVaultWithRecoveryAsync(location.RootPath, location.Manifest.VaultId, token);
+        if (loaded is null) { MarkOffline(); Feedback = "代码库信息尚未恢复；请选择有效代码库或明确恢复备份。"; return; }
         if (loaded.Manifest.VaultId != location.Manifest.VaultId)
         {
             MarkOffline();
@@ -743,10 +820,10 @@ public partial class MainViewModel : ObservableObject
     /// <summary>集中更新派生字段和按钮，避免不同状态下漏刷新。</summary>
     private void UpdateDetails()
     {
-        foreach (var name in new[] { nameof(CanWork), nameof(CanUseVault), nameof(CanSelectLocal), nameof(CanPush), nameof(CanPull), nameof(CanOpenLocal),
+        foreach (var name in new[] { nameof(CanWork), nameof(CanRecoverSettings), nameof(ShowSettingsRecovery), nameof(CanUseVault), nameof(CanSelectLocal), nameof(CanPush), nameof(CanPull), nameof(CanOpenLocal),
             nameof(HasSelection), nameof(ShowDisconnected), nameof(ShowWelcome), nameof(NeedsBinding), nameof(DetailTitle), nameof(LocalPath), nameof(RemotePath), nameof(BranchText),
             nameof(StatusText), nameof(WorktreeText), nameof(Guidance), nameof(ConnectionText), nameof(PushLabel), nameof(PullLabel) }) OnPropertyChanged(name);
-        foreach (var command in new IRelayCommand[] { DiscoverCommand, OpenLibraryCommand, CreateLibraryCommand, ImportCommand, CloneCommand, BindCommand,
+        foreach (var command in new IRelayCommand[] { DiscoverCommand, RecoverSettingsCommand, OpenLibraryCommand, CreateLibraryCommand, ImportCommand, CloneCommand, BindCommand,
             RefreshCommand, PushCommand, PullCommand, RecoverCommand, SettingsCommand, OpenLocalCommand }) command.NotifyCanExecuteChanged();
     }
 

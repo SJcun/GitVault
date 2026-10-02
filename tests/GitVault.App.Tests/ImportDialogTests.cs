@@ -157,6 +157,8 @@ public sealed class ImportDialogTests
             Assert.Equal("刷新当前仓库完成", viewModel.Feedback);
             Assert.Equal(2, viewModel.Items.Count);
             await RefreshSchedulingTests.VerifyTransferPriorityAsync(viewModel, git);
+            await BackupRecoveryTests.VerifySettingsAsync(root);
+            await BackupRecoveryTests.VerifyVaultAsync(root, local, git);
         }
         finally
         {

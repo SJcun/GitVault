@@ -16,7 +16,7 @@ public sealed class VaultService
             throw new InvalidOperationException("请选择不存在或空的目录创建代码库。");
         Directory.CreateDirectory(Path.Combine(root, "repos"));
         var manifest = new VaultManifest { Name = name.Trim() };
-        SettingsService.WriteJson(Path.Combine(root, "vault.json"), manifest);
+        JsonFile.Write(Path.Combine(root, "vault.json"), manifest, value => Validate(new VaultLocation(root, value)));
         return Open(root);
     }
 
@@ -24,7 +24,7 @@ public sealed class VaultService
     public DirectoryKind Probe(string path)
     {
         var root = Path.GetFullPath(path);
-        if (File.Exists(Path.Combine(root, "vault.json"))) return DirectoryKind.CodeLibrary;
+        if (File.Exists(Path.Combine(root, "vault.json")) || File.Exists(Path.Combine(root, "vault.json.bak"))) return DirectoryKind.CodeLibrary;
         if (Directory.Exists(Path.Combine(root, ".git")) || File.Exists(Path.Combine(root, ".git"))) return DirectoryKind.LocalProject;
         return Directory.Exists(root) ? DirectoryKind.Plain : DirectoryKind.Missing;
     }
@@ -33,22 +33,50 @@ public sealed class VaultService
     public VaultLocation Open(string root)
     {
         root = Path.GetFullPath(root);
-        var manifest = JsonSerializer.Deserialize<VaultManifest>(File.ReadAllText(Path.Combine(root, "vault.json")), SettingsService.JsonOptions)
-            ?? throw new InvalidDataException("代码库信息为空，请确认选择了正确的目录。");
+        var manifest = JsonFile.Read<VaultManifest>(Path.Combine(root, "vault.json"), value => Validate(new VaultLocation(root, value)));
+        return new(root, manifest);
+    }
+
+    /// <summary>完整验证清单备份及已知身份，不改变主文件。</summary>
+    public VaultLocation ReadBackup(string root, Guid? expectedId = null)
+    {
+        root = Path.GetFullPath(root);
+        var manifest = JsonFile.Read<VaultManifest>(Path.Combine(root, "vault.json.bak"), value => Validate(new VaultLocation(root, value), expectedId));
+        return new(root, manifest);
+    }
+
+    /// <summary>取得与登记相同的短文件锁，用户确认后才恢复有效且身份匹配的备份。</summary>
+    public VaultLocation RestoreBackup(string root, Guid? expectedId = null)
+    {
+        root = Path.GetFullPath(root);
+        using var manifestLock = AcquireManifestLock(root);
+        var backup = ReadBackup(root, expectedId);
+        VaultLocation? existing = null;
+        try { existing = Open(root); }
+        catch (Exception error) when (error is JsonException or InvalidDataException or FileNotFoundException) { }
+        if (existing is not null && existing.Manifest.VaultId != backup.Manifest.VaultId)
+            throw new IOException("当前有效代码库与备份身份不同，不能替换。");
+        JsonFile.Restore<VaultManifest>(Path.Combine(root, "vault.json"), value => Validate(new VaultLocation(root, value), backup.Manifest.VaultId));
+        return Open(root);
+    }
+
+    /// <summary>所有主文件、备份和待保存清单使用相同的身份、唯一性及路径校验。</summary>
+    private void Validate(VaultLocation location, Guid? expectedId = null)
+    {
+        var manifest = location.Manifest;
         if (manifest.SchemaVersion != 1 || manifest.VaultId == Guid.Empty || string.IsNullOrWhiteSpace(manifest.Name) || manifest.Repositories is null)
             throw new InvalidDataException("代码库信息格式无效或版本暂不支持。");
-        var location = new VaultLocation(root, manifest);
+        if (expectedId is { } identity && manifest.VaultId != identity) throw new IOException("备份属于其他代码库，不能恢复到当前位置。");
         var ids = new HashSet<Guid>();
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var repository in manifest.Repositories)
         {
-            if (repository is null || repository.RepoId == Guid.Empty || string.IsNullOrWhiteSpace(repository.Name) || !ids.Add(repository.RepoId)
-                || !paths.Add(RepositoryPath(location, repository)))
+            if (repository is null || repository.RepoId == Guid.Empty || string.IsNullOrWhiteSpace(repository.Name)
+                || !ids.Add(repository.RepoId) || !names.Add(repository.Name) || !paths.Add(RepositoryPath(location, repository)))
                 throw new InvalidDataException("代码库中的项目登记有重复或无效条目。");
         }
-        return location;
     }
-
     /// <summary>每次传输重新检查磁盘身份与仓库登记，防止盘符被其他设备复用。</summary>
     public string VerifyRepository(VaultLocation vault, VaultRepository repository)
     {
@@ -94,7 +122,7 @@ public sealed class VaultService
             string.Equals(RepositoryPath(current, r), path, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException("此仓库已登记，请刷新。");
         current.Manifest.Repositories.Add(repository);
-        SettingsService.WriteJson(Path.Combine(current.RootPath, "vault.json"), current.Manifest);
+        JsonFile.Write(Path.Combine(current.RootPath, "vault.json"), current.Manifest, value => Validate(new VaultLocation(current.RootPath, value), vault.Manifest.VaultId));
         return current;
     }
 
