@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Windows;
 using System.Windows.Data;
+using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using GitVault.Core;
@@ -18,6 +19,16 @@ public partial class MainViewModel : ObservableObject
     private readonly VaultService vaults = new();
     private readonly SettingsService settingsStore = new();
     private readonly RepositoryService repositories;
+    /// <summary>文件写入与界面批量显示独立，慢磁盘不阻塞 Dispatcher。</summary>
+    private readonly BufferedLog log;
+    /// <summary>创建 ViewModel 的界面线程，日志回调可从 Git 后台线程到达。</summary>
+    private readonly Dispatcher dispatcher = Dispatcher.CurrentDispatcher;
+    /// <summary>即使未达到条数阈值也定期显示近期日志和告警。</summary>
+    private readonly DispatcherTimer logTimer = new() { Interval = TimeSpan.FromMilliseconds(200) };
+    /// <summary>原子标记已有待执行显示回调，合并高频消息。</summary>
+    private int displayFlushQueued;
+    /// <summary>日志关闭期间禁止新任务和通知，防止排空后再次入队。</summary>
+    private bool isClosing;
     private AppSettings settings = new();
     /// <summary>当前选定的 Vault 与本次任务的取消源。</summary>
     private VaultLocation? current;
@@ -69,24 +80,32 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private string logText = "";
     /// <summary>日志区域的展开状态。</summary>
     [ObservableProperty] private bool isLogOpen;
+    /// <summary>独立保留日志不完整提示，不覆盖 Git 操作结果。</summary>
+    [ObservableProperty] private string logWarning = "";
 
     /// <summary>初始化服务和日志回调。</summary>
-    public MainViewModel()
+    public MainViewModel() : this(null) { }
+
+    /// <summary>测试慢写入时可注入同一日志服务，不增加生产配置项。</summary>
+    internal MainViewModel(BufferedLog? bufferedLog)
     {
         repositories = new RepositoryService(git, vaults);
         FilteredItems = CollectionViewSource.GetDefaultView(Items);
         FilteredItems.Filter = item => item is RepositoryItem row && row.Name.Contains(Search, StringComparison.OrdinalIgnoreCase);
-        git.Log = message => Application.Current.Dispatcher.BeginInvoke(() => AppendLog(message));
+        log = bufferedLog ?? new BufferedLog(() => settingsStore.DirectoryPath);
+        logTimer.Tick += (_, _) => FlushLogDisplay();
+        logTimer.Start();
+        git.Log = AppendLog;
     }
 
     /// <summary>普通命令是否可执行。</summary>
-    public bool CanWork => !IsBusy && !transferQueued && settingsAvailable && !Dialogs.IsOpen;
+    public bool CanWork => !isClosing && !IsBusy && !transferQueued && settingsAvailable && !Dialogs.IsOpen;
     /// <summary>操作 Vault 需要有效连接。</summary>
     public bool CanUseVault => CanWork && current is not null && IsOnline;
     /// <summary>克隆或绑定需要已选中仓库。</summary>
     public bool CanSelectLocal => CanUseVault && SelectedItem is not null;
     /// <summary>当前仓库检查完成后，其他仓库的检查不阻止传输请求。</summary>
-    private bool CanTransfer => settingsAvailable && !Dialogs.IsOpen && current is not null && IsOnline && SelectedItem is not null
+    private bool CanTransfer => !isClosing && settingsAvailable && !Dialogs.IsOpen && current is not null && IsOnline && SelectedItem is not null
         && !transferQueued && (!IsBusy || isRefreshingOtherRows);
     /// <summary>领先、缺失分支或仅有新标签时允许推送；冲突标签需人工处理。</summary>
     public bool CanPush => CanTransfer && SelectedItem?.Status is { TagConflict: null } state
@@ -529,6 +548,7 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void CopyLog()
     {
+        FlushLogDisplay();
         try { Clipboard.SetText(LogText.Length == 0 ? "尚无日志" : LogText); }
         catch (Exception error) { Dialogs.Error(error.Message); }
     }
@@ -536,7 +556,7 @@ public partial class MainViewModel : ObservableObject
     /// <summary>统一任务生命周期与错误展示。</summary>
     private async Task ExecuteAsync(string title, Func<CancellationToken, Task> action)
     {
-        if (IsBusy) return;
+        if (IsBusy || isClosing) return;
         var completed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         operationCompleted = completed;
         IsBusy = true;
@@ -564,6 +584,7 @@ public partial class MainViewModel : ObservableObject
         }
         finally
         {
+            FlushLogDisplay();
             cancellation = null;
             operationCompleted = null;
             completed.SetResult();
@@ -585,7 +606,7 @@ public partial class MainViewModel : ObservableObject
     /// <summary>设备通知合并为一次扫描，忙碌时保留通知，任务结束后补扫。</summary>
     public Task DeviceChangedAsync()
     {
-        if (!settingsAvailable || cancellation?.IsCancellationRequested == true) return Task.CompletedTask;
+        if (isClosing || !settingsAvailable || cancellation?.IsCancellationRequested == true) return Task.CompletedTask;
         deviceScanPending = true;
         return ProcessPendingRefreshesAsync();
     }
@@ -593,7 +614,7 @@ public partial class MainViewModel : ObservableObject
     /// <summary>窗口激活请求短间隔复查；模态输入期间不抢占用户操作。</summary>
     public Task WindowActivatedAsync()
     {
-        if (!settingsAvailable || Dialogs.IsOpen || current is null || !IsOnline
+        if (isClosing || !settingsAvailable || Dialogs.IsOpen || current is null || !IsOnline
             || cancellation?.IsCancellationRequested == true) return Task.CompletedTask;
         automaticRefreshPending = true;
         return ProcessPendingRefreshesAsync();
@@ -676,23 +697,41 @@ public partial class MainViewModel : ObservableObject
         Feedback = "未找到原来的 U 盘代码库，请插入 U 盘或重新选择位置。";
     }
 
-    /// <summary>保存日志并限制界面中展示的字符数。</summary>
-    private void AppendLog(string message)
+    /// <summary>日志回调只入内存队列；高频输出合并为一个待显示的 Dispatcher 请求。</summary>
+    internal void AppendLog(string message)
     {
-        var line = $"[{DateTime.Now:HH:mm:ss}] {message}{Environment.NewLine}";
-        LogText += line;
-        if (LogText.Length > 60000) LogText = LogText[^50000..];
-        try
+        if (log.Add(message) && Interlocked.Exchange(ref displayFlushQueued, 1) == 0)
+            dispatcher.BeginInvoke(FlushLogDisplay);
+    }
+
+    /// <summary>一次更新近期文本和持久告警，任务结束或复制前也可立即刷新。</summary>
+    private void FlushLogDisplay()
+    {
+        Interlocked.Exchange(ref displayFlushQueued, 0);
+        var batch = log.TakeDisplay();
+        if (batch.Text.Length > 0)
         {
-            Directory.CreateDirectory(settingsStore.DirectoryPath);
-            File.AppendAllText(Path.Combine(settingsStore.DirectoryPath, $"gitvault-{DateTime.Now:yyyy-MM-dd}.log"), line);
+            LogText += batch.Text;
+            if (LogText.Length > 60000) LogText = LogText[^50000..];
         }
-        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        if (batch.Warning.Length > 0)
         {
-            Feedback = "日志文件无法写入；可复制界面日志。";
+            LogWarning = batch.Warning;
+            IsLogOpen = true;
         }
     }
 
+    /// <summary>关闭时停止界面计时器，在有限时间内等待后台写入，并返回完整性结果。</summary>
+    public async Task<bool> StopLoggingAsync()
+    {
+        isClosing = true;
+        Cancel();
+        UpdateDetails();
+        logTimer.Stop();
+        var complete = await log.StopAsync(TimeSpan.FromSeconds(2));
+        FlushLogDisplay();
+        return complete;
+    }
     /// <summary>集中更新派生字段和按钮，避免不同状态下漏刷新。</summary>
     private void UpdateDetails()
     {

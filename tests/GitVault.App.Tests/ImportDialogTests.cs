@@ -45,6 +45,7 @@ public sealed class ImportDialogTests
     {
         var root = Path.Combine(Path.GetTempPath(), "GitVaultDialogTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
+        MainViewModel? viewModel = null;
         try
         {
             var local = Path.Combine(root, "本地项目");
@@ -58,7 +59,7 @@ public sealed class ImportDialogTests
             var settingsStore = new SettingsService(Path.Combine(root, "设置"));
             var settings = new AppSettings();
             settings.Bindings.Add(new RepositoryBinding(vault.Manifest.VaultId, existing.RepoId, local));
-            var viewModel = new MainViewModel();
+            viewModel = new MainViewModel();
             SetField(viewModel, "settingsStore", settingsStore);
             SetField(viewModel, "settings", settings);
             SetField(viewModel, "settingsAvailable", true);
@@ -159,6 +160,7 @@ public sealed class ImportDialogTests
         }
         finally
         {
+            if (viewModel is not null) await viewModel.StopLoggingAsync();
             // Git 对象文件可能是只读的；仅清理本测试创建的唯一目录。
             foreach (var file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)) File.SetAttributes(file, FileAttributes.Normal);
             Directory.Delete(root, true);

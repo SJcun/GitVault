@@ -14,6 +14,10 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer deviceTimer = new() { Interval = TimeSpan.FromSeconds(1) };
     /// <summary>启动完成后才响应窗口激活。</summary>
     private bool initialized;
+    /// <summary>关闭阶段只排空一次日志，避免再次触发 Closing 时重复等待。</summary>
+    private bool closingLogs;
+    /// <summary>排空已结束，下一次 Closing 可以真正关闭窗口。</summary>
+    private bool logsStopped;
 
     /// <summary>初始化视图、设备通知和关闭检查。</summary>
     public MainWindow()
@@ -35,9 +39,23 @@ public partial class MainWindow : Window
     }
 
     /// <summary>任务未结束时留在窗口；允许关闭时清空通知队列和节流等待。</summary>
-    private void OnClosing(object? sender, CancelEventArgs e)
+    private async void OnClosing(object? sender, CancelEventArgs e)
     {
-        if (!viewModel.IsBusy) { deviceTimer.Stop(); viewModel.CancelCommand.Execute(null); return; }
+        if (logsStopped) return;
+        if (!viewModel.IsBusy)
+        {
+            e.Cancel = true;
+            if (closingLogs) return;
+            closingLogs = true;
+            deviceTimer.Stop();
+            viewModel.CancelCommand.Execute(null);
+            if (!await viewModel.StopLoggingAsync())
+                MessageBox.Show(this, viewModel.LogWarning + "\n本次关闭不会等待更久；未写入的近期日志可能丢失。",
+                    "日志未完全保存", MessageBoxButton.OK, MessageBoxImage.Warning);
+            logsStopped = true;
+            _ = Dispatcher.BeginInvoke(new Action(Close));
+            return;
+        }
         e.Cancel = true;
         viewModel.Feedback = "操作正在进行，请等待完成或先取消操作。";
     }

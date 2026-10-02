@@ -116,6 +116,7 @@ async Task MeasureAsync()
                     // 清空上一轮待显示日志，再开始下一轮测量。
                     await Application.Current.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
                 }
+                await viewModel.StopLoggingAsync();
             }
         }
         Console.WriteLine(JsonSerializer.Serialize(new { samples }, new JsonSerializerOptions { WriteIndented = true }));
