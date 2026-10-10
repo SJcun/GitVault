@@ -101,3 +101,8 @@ public sealed record RecoveryResult(int Recovered, int Skipped, IReadOnlyList<Re
 /// <param name="Path">失败候选的完整目录路径。</param>
 /// <param name="Message">原始失败原因。</param>
 public sealed record RecoveryFailure(string Path, string Message);
+
+/// <summary>迁移后的项目登记；旧目录清理失败时单独报告，不否定已经完成的迁移。</summary>
+/// <param name="Repository">目标代码库中的项目，沿用原项目标识。</param>
+/// <param name="CleanupWarning">已移除登记的旧目录无法完全清理时的说明。</param>
+public sealed record MigrationResult(VaultRepository Repository, string? CleanupWarning);

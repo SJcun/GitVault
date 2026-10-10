@@ -29,6 +29,107 @@ public sealed class RepositoryService(GitCommandService git, VaultService vaults
         return repository;
     }
 
+    /// <summary>完整复制并验证裸仓库后迁移登记，成功前不移除原项目，也不接触本地工作区。</summary>
+    public async Task<MigrationResult> MigrateAsync(VaultLocation sourceVault, VaultRepository repository,
+        VaultLocation targetVault, CancellationToken token = default)
+    {
+        token.ThrowIfCancellationRequested();
+        var source = vaults.VerifyRepository(sourceVault, repository);
+        var target = vaults.Open(targetVault.RootPath);
+        if (target.Manifest.VaultId != targetVault.Manifest.VaultId) throw new IOException("目标代码库身份发生变化。");
+        if (sourceVault.Manifest.VaultId == target.Manifest.VaultId)
+            throw new InvalidOperationException("请选择另一个代码库，不能迁移到原代码库或它的副本。");
+        if (target.RootPath.StartsWith(source + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("目标代码库不能位于原项目目录内。");
+        var migrated = new VaultRepository { RepoId = repository.RepoId, Name = repository.Name, RelativePath = repository.RelativePath };
+        var destination = vaults.RepositoryPath(target, migrated);
+        if (Path.Exists(destination) || target.Manifest.Repositories.Any(entry => entry.RepoId == migrated.RepoId
+            || string.Equals(entry.Name, migrated.Name, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("目标代码库已有同名项目或相同项目标识，请选择其他代码库。");
+        await RequireBareAsync(source, token);
+        if ((await git.RunAsync(source, ["rev-parse", "--is-shallow-repository"], token)).Output.Trim() == "true")
+            throw new InvalidOperationException("不支持迁移浅仓库，请先补全历史。");
+        var alternates = Path.Combine(source, "objects", "info", "alternates");
+        if (File.Exists(alternates) && !string.IsNullOrWhiteSpace(await File.ReadAllTextAsync(alternates, token)))
+            throw new InvalidOperationException("项目依赖外部 Git 对象，请先将对象补全到仓库内再迁移。");
+        var head = (await git.RunAsync(source, ["rev-parse", "--verify", "HEAD"], token)).Output.Trim();
+        await RequireTransferContentsAsync(source, head, token);
+        await git.RunAsync(source, ["fsck", "--full"], token);
+        var state = await ReadMigrationStateAsync(source, token);
+        var temporary = Path.Combine(Path.GetDirectoryName(destination)!, $".migrate-{Guid.NewGuid():N}");
+        git.Log?.Invoke($"正在迁移「{repository.Name}」：{source} → {destination}");
+        await CopyRepositoryDirectoryAsync(source, temporary, token);
+        await RequireBareAsync(temporary, token);
+        await git.RunAsync(temporary, ["fsck", "--full"], token);
+        if (state != await ReadMigrationStateAsync(temporary, token) || state != await ReadMigrationStateAsync(source, token))
+            throw new IOException("迁移期间项目引用发生变化，原项目保留，请停止其他 Git 操作后重试。");
+        vaults.VerifyRepository(sourceVault, repository);
+        if (vaults.Open(target.RootPath).Manifest.VaultId != target.Manifest.VaultId) throw new IOException("目标代码库身份发生变化。");
+        token.ThrowIfCancellationRequested();
+
+        // 从此进入短提交阶段，不再响应取消，避免把已移除原项目的成功迁移报告为取消。
+        Directory.Move(temporary, destination);
+        vaults.Register(target, migrated);
+        string retired;
+        try { retired = vaults.RetireRepository(sourceVault, repository, target, migrated); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            throw new IOException($"目标副本已完整登记在 {destination}，但原项目未能移除。请刷新检查两个代码库。\n{error.Message}", error);
+        }
+        try
+        {
+            await Task.Run(() => DeleteRetiredDirectory(retired));
+            return new(migrated, null);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or InvalidDataException)
+        {
+            return new(migrated, $"迁移已完成，但旧目录未能完全清理：{retired}\n{error.Message}");
+        }
+    }
+
+    /// <summary>比较全部引用和 HEAD，包含非当前分支、附注标签与自定义引用。</summary>
+    private async Task<string> ReadMigrationStateAsync(string path, CancellationToken token)
+    {
+        var head = await File.ReadAllTextAsync(Path.Combine(path, "HEAD"), token);
+        var refs = await git.RunAsync(path, ["for-each-ref", "--sort=refname", "--format=%(refname) %(objectname) %(symref)"], token);
+        return head + refs.Output;
+    }
+
+    /// <summary>逐文件复制完整仓库；拒绝目录链接和 Git 锁，取消时保留临时目录供检查。</summary>
+    private static async Task CopyRepositoryDirectoryAsync(string source, string destination, CancellationToken token)
+    {
+        token.ThrowIfCancellationRequested();
+        Directory.CreateDirectory(destination);
+        foreach (var entry in Directory.EnumerateFileSystemEntries(source))
+        {
+            token.ThrowIfCancellationRequested();
+            var attributes = File.GetAttributes(entry);
+            if (attributes.HasFlag(FileAttributes.ReparsePoint)) throw new InvalidDataException("项目中不能包含文件或目录链接：" + entry);
+            if (entry.EndsWith(".lock", StringComparison.OrdinalIgnoreCase)) throw new IOException("项目存在 Git 锁，请确认其他 Git 操作已结束：" + entry);
+            var target = Path.Combine(destination, Path.GetFileName(entry));
+            if (attributes.HasFlag(FileAttributes.Directory)) await CopyRepositoryDirectoryAsync(entry, target, token);
+            else
+            {
+                await using var input = new FileStream(entry, FileMode.Open, FileAccess.Read, FileShare.Read);
+                await using var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                await input.CopyToAsync(output, token);
+            }
+        }
+    }
+
+    /// <summary>仅清理本次改名隔离的旧目录；逐层拒绝链接，并解除 Git 对象的只读属性。</summary>
+    private static void DeleteRetiredDirectory(string path)
+    {
+        foreach (var entry in Directory.EnumerateFileSystemEntries(path))
+        {
+            var attributes = File.GetAttributes(entry);
+            if (attributes.HasFlag(FileAttributes.ReparsePoint)) throw new InvalidDataException("旧目录包含链接，停止清理：" + entry);
+            if (attributes.HasFlag(FileAttributes.Directory)) DeleteRetiredDirectory(entry);
+            else { File.SetAttributes(entry, FileAttributes.Normal); File.Delete(entry); }
+        }
+        Directory.Delete(path);
+    }
+
     /// <summary>克隆到全新目录，只移除本次克隆生成的 origin。</summary>
     public async Task CloneAsync(VaultLocation vault, VaultRepository repository, string destination, CancellationToken token = default)
     {

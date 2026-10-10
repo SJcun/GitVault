@@ -134,7 +134,8 @@
                                 <Button Content="{Binding PushLabel}" Command="{Binding PushCommand}" Tag="{StaticResource IconPush}" Style="{StaticResource PrimaryButton}" Margin="0,0,8,8" />
                                 <Button Content="{Binding PullLabel}" Command="{Binding PullCommand}" Tag="{StaticResource IconPull}" Margin="0,0,8,8" />
                                 <Button Content="克隆到本机" Command="{Binding CloneCommand}" Tag="{StaticResource IconClone}" Margin="0,0,8,8" />
-                                <Button Content="绑定已有项目" Command="{Binding BindCommand}" Tag="{StaticResource IconBind}" Margin="0,0,0,8" />
+                                <Button Content="绑定已有项目" Command="{Binding BindCommand}" Tag="{StaticResource IconBind}" Margin="0,0,8,8" />
+                                <Button Content="迁移到其他代码库" Command="{Binding MigrateCommand}" Tag="{StaticResource IconRepository}" Margin="0,0,0,8" />
                             </WrapPanel>
                             <TextBlock Text="{Binding Guidance}" Style="{StaticResource MutedText}" FontSize="12" Margin="0,0,0,24" />
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,12">

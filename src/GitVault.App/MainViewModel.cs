@@ -43,6 +43,8 @@ public partial class MainViewModel : ObservableObject
     /// <summary>窗口激活至多保留一次复查，设备通知独立保留一次补扫。</summary>
     private bool automaticRefreshPending;
     private bool deviceScanPending;
+    /// <summary>本次连接已提醒的迁移项目；代码库断开后清除，避免刷新或重复设备通知反复弹窗。</summary>
+    private readonly HashSet<(Guid Vault, Guid Repository)> migrationReminded = [];
     /// <summary>唯一的自动刷新调度任务及取消源，防止事件堆积或关闭后继续刷新。</summary>
     private Task? automaticRefreshTask;
     private CancellationTokenSource? automaticRefreshCancellation;
@@ -258,6 +260,8 @@ public partial class MainViewModel : ObservableObject
         var found = await Task.Run(() => vaults.Discover(settings.KnownVaultPaths), token);
         VaultChoices.Clear();
         foreach (var location in found) VaultChoices.Add(new VaultChoice(location));
+        migrationReminded.RemoveWhere(key => !found.Any(location => location.Manifest.VaultId == key.Vault
+            && location.Manifest.Repositories.Any(repository => repository.RepoId == key.Repository)));
         var matches = current is null ? found : found.Where(v => v.Manifest.VaultId == current.Manifest.VaultId).ToList();
         if (matches.Count == 1) await LoadVaultAsync(matches[0], token);
         else if (matches.Count > 1)
@@ -269,6 +273,7 @@ public partial class MainViewModel : ObservableObject
         }
         else if (current is not null) MarkOffline();
         else Feedback = "尚未发现 U 盘代码库 · 插入 U 盘后重试，或创建新的代码库。";
+        await RemindMigratedProjectsAsync(found, token);
         UpdateDetails();
     }
 
@@ -391,6 +396,39 @@ public partial class MainViewModel : ObservableObject
         }
         SelectedItem = Items.FirstOrDefault(item => item.Repository.RepoId == selectedId) ?? Items.FirstOrDefault();
         await RefreshRowsAsync(token);
+        await RemindMigratedProjectsAsync([current], token);
+    }
+
+    /// <summary>识别同一项目在旧代码库的本机绑定，提醒用户打开新代码库并重新绑定。</summary>
+    private async Task RemindMigratedProjectsAsync(IEnumerable<VaultLocation> locations, CancellationToken token)
+    {
+        foreach (var location in locations)
+        {
+            var pending = location.Manifest.Repositories.Where(repository =>
+                !migrationReminded.Contains((location.Manifest.VaultId, repository.RepoId))
+                && !settings.Bindings.Any(binding => binding.VaultId == location.Manifest.VaultId && binding.RepoId == repository.RepoId)
+                && settings.Bindings.Any(binding => binding.VaultId != location.Manifest.VaultId && binding.RepoId == repository.RepoId)).ToArray();
+            if (pending.Length == 0) continue;
+            token.ThrowIfCancellationRequested();
+            // 在显示窗口前记下本轮提醒，防止关闭窗口时的激活或设备通知重复弹出。
+            foreach (var repository in pending) migrationReminded.Add((location.Manifest.VaultId, repository.RepoId));
+            var names = string.Join("\n", pending.Select(repository => "• " + repository.Name));
+            if (!Dialogs.Confirm("项目迁移提醒",
+                $"以下项目现在位于代码库「{location.Manifest.Name}」，这台电脑仍保留旧代码库的绑定：\n\n{names}"
+                + $"\n\n代码库位置：{location.RootPath}\n请点击“绑定已有项目”，选择本机原来的项目文件夹，即可继续同步。",
+                "打开待绑定项目"))
+            {
+                Feedback = $"代码库「{location.Manifest.Name}」中有迁移项目需要重新绑定。";
+                continue;
+            }
+            if (current?.Manifest.VaultId != location.Manifest.VaultId
+                || !string.Equals(current.RootPath, location.RootPath, StringComparison.OrdinalIgnoreCase))
+                await LoadVaultAsync(location, token);
+            Search = "";
+            SelectedItem = Items.FirstOrDefault(item => item.Repository.RepoId == pending[0].RepoId);
+            await LoadCommitsAsync(token);
+            Feedback = "项目已迁移，请点击“绑定已有项目”选择本机原来的项目文件夹。";
+        }
     }
 
     /// <summary>将已有工作区导入 U 盘。</summary>
@@ -412,6 +450,44 @@ public partial class MainViewModel : ObservableObject
             await LoadVaultAsync(current!, token);
             SelectedItem = Items.First(item => item.Repository.RepoId == repository.RepoId);
             await LoadCommitsAsync(token);
+        });
+    }
+
+    /// <summary>将所选项目迁至已有代码库，迁移成功后切换代码库并沿用当前电脑的工作目录。</summary>
+    [RelayCommand(CanExecute = nameof(CanSelectLocal))]
+    private async Task MigrateAsync()
+    {
+        var source = current!;
+        var item = SelectedItem!;
+        var targetPath = Dialogs.SelectMigrationTarget(item.Name, source.Manifest.VaultId, VaultChoices);
+        if (targetPath is null) return;
+        await ExecuteAsync("迁移项目", async token =>
+        {
+            var target = vaults.Open(targetPath);
+            var result = await repositories.MigrateAsync(source, item.Repository, target, token);
+            settings.Bindings.RemoveAll(binding => binding.VaultId == source.Manifest.VaultId && binding.RepoId == item.Repository.RepoId);
+            if (item.LocalPath is { } localPath)
+                settings.Bindings.Add(new RepositoryBinding(target.Manifest.VaultId, result.Repository.RepoId, localPath));
+            // 数据迁移已经提交，后续刷新不把取消或设置写入失败误报为迁移失败。
+            try { await LoadVaultAsync(target, CancellationToken.None); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or InvalidDataException)
+            {
+                Items.Clear();
+                Commits.Clear();
+                SelectedItem = null;
+                Feedback = "迁移已完成，本机绑定或状态更新失败 · 查看日志";
+                AppendLog($"项目已迁移到 {target.RootPath}，请打开目标代码库并按需重新绑定。\n{error.Message}");
+                if (result.CleanupWarning is { } cleanupWarning) AppendLog(cleanupWarning);
+                IsLogOpen = true;
+                return;
+            }
+            Feedback = $"迁移完成：「{item.Name}」已移至「{target.Manifest.Name}」。";
+            if (result.CleanupWarning is { } warning)
+            {
+                Feedback = "迁移已完成，旧目录清理未完成 · 查看日志";
+                AppendLog(warning);
+                IsLogOpen = true;
+            }
         });
     }
 
@@ -823,7 +899,7 @@ public partial class MainViewModel : ObservableObject
         foreach (var name in new[] { nameof(CanWork), nameof(CanRecoverSettings), nameof(ShowSettingsRecovery), nameof(CanUseVault), nameof(CanSelectLocal), nameof(CanPush), nameof(CanPull), nameof(CanOpenLocal),
             nameof(HasSelection), nameof(ShowDisconnected), nameof(ShowWelcome), nameof(NeedsBinding), nameof(DetailTitle), nameof(LocalPath), nameof(RemotePath), nameof(BranchText),
             nameof(StatusText), nameof(WorktreeText), nameof(Guidance), nameof(ConnectionText), nameof(PushLabel), nameof(PullLabel) }) OnPropertyChanged(name);
-        foreach (var command in new IRelayCommand[] { DiscoverCommand, RecoverSettingsCommand, OpenLibraryCommand, CreateLibraryCommand, ImportCommand, CloneCommand, BindCommand,
+        foreach (var command in new IRelayCommand[] { DiscoverCommand, RecoverSettingsCommand, OpenLibraryCommand, CreateLibraryCommand, ImportCommand, MigrateCommand, CloneCommand, BindCommand,
             RefreshCommand, PushCommand, PullCommand, RecoverCommand, SettingsCommand, OpenLocalCommand }) command.NotifyCanExecuteChanged();
     }
 

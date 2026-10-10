@@ -1,6 +1,8 @@
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using GitVault.Core;
 using Microsoft.Win32;
 
 namespace GitVault.App;
@@ -98,6 +100,78 @@ public static class Dialogs
         window.Content = panel;
         window.Loaded += (_, _) => inputs.FirstOrDefault()?.Focus();
         return ShowModal(window.ShowDialog) == true ? inputs.Select(input => input.Text.Trim()).ToArray() : null;
+    }
+
+    /// <summary>从已识别的其他代码库选择迁移目标，浏览补充的目录须为有效且不同身份的代码库。</summary>
+    public static string? SelectMigrationTarget(string projectName, Guid sourceVaultId, IEnumerable<VaultChoice> choices)
+    {
+        var window = new Window
+        {
+            Title = "迁移到其他代码库", Width = 610, SizeToContent = SizeToContent.Height,
+            ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Owner = Application.Current.MainWindow
+        };
+        var panel = new StackPanel { Margin = new Thickness(26) };
+        panel.Children.Add(new TextBlock { Text = window.Title, FontSize = 22, FontWeight = FontWeights.SemiBold });
+        panel.Children.Add(new TextBlock
+        {
+            Text = $"将「{projectName}」的完整仓库迁移到目标代码库。验证成功后移除原代码库中的项目，本地工作目录保持原样。",
+            TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 10, 0, 22)
+        });
+        panel.Children.Add(new TextBlock { Text = "目标代码库", Margin = new Thickness(0, 0, 0, 6) });
+        // 代码库标识相同的副本也不是迁移目标；显示路径以区分同名代码库。
+        var targets = new ObservableCollection<VaultChoice>(choices.Where(choice => choice.Location.Manifest.VaultId != sourceVaultId));
+        var selector = new ComboBox
+        {
+            ItemsSource = targets, DisplayMemberPath = nameof(VaultChoice.Label), MinWidth = 200,
+            Padding = new Thickness(10, 8, 10, 8), SelectedIndex = targets.Count == 1 ? 0 : -1
+        };
+        System.Windows.Automation.AutomationProperties.SetName(selector, "目标代码库");
+        var row = new DockPanel { Margin = new Thickness(0, 0, 0, 4) };
+        var browse = new Button { Content = "浏览…", Margin = new Thickness(8, 0, 0, 0) };
+        DockPanel.SetDock(browse, Dock.Right);
+        row.Children.Add(browse);
+        row.Children.Add(selector);
+        panel.Children.Add(row);
+        panel.Children.Add(new TextBlock
+        {
+            Text = "选择其他代码库；列表中没有目标时可点击浏览。目标中不能已有同名项目。",
+            Foreground = (System.Windows.Media.Brush)Application.Current.FindResource("Muted"),
+            FontSize = 11, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 0, 14)
+        });
+        var error = new TextBlock { Foreground = System.Windows.Media.Brushes.Firebrick, TextWrapping = TextWrapping.Wrap };
+        panel.Children.Add(error);
+        browse.Click += (_, _) =>
+        {
+            var picker = new OpenFolderDialog { Title = "选择目标代码库" };
+            if (picker.ShowDialog(window) != true) return;
+            try
+            {
+                var location = new VaultService().Open(picker.FolderName);
+                if (location.Manifest.VaultId == sourceVaultId)
+                {
+                    error.Text = "请选择其他代码库，不能迁移到当前代码库或它的副本。";
+                    return;
+                }
+                var choice = targets.FirstOrDefault(target => string.Equals(target.Location.RootPath, location.RootPath, StringComparison.OrdinalIgnoreCase));
+                if (choice is null) { choice = new VaultChoice(location); targets.Add(choice); }
+                selector.SelectedItem = choice;
+                error.Text = "";
+            }
+            catch (Exception failure) { error.Text = failure.Message; }
+        };
+        var actions = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new Thickness(0, 14, 0, 0) };
+        var cancel = new Button { Content = "取消", IsCancel = true };
+        var submit = new Button { Content = "确定", IsDefault = true, IsEnabled = selector.SelectedItem is VaultChoice, Style = (Style)Application.Current.FindResource("PrimaryButton") };
+        selector.SelectionChanged += (_, _) => submit.IsEnabled = selector.SelectedItem is VaultChoice;
+        cancel.Click += (_, _) => window.DialogResult = false;
+        submit.Click += (_, _) => window.DialogResult = true;
+        actions.Children.Add(cancel);
+        actions.Children.Add(submit);
+        panel.Children.Add(actions);
+        window.Content = panel;
+        window.Loaded += (_, _) => selector.Focus();
+        return ShowModal(window.ShowDialog) == true ? ((VaultChoice)selector.SelectedItem).Location.RootPath : null;
     }
 
     /// <summary>源字段变化时同步派生字段；用户手动改过派生字段后不再覆盖。</summary>

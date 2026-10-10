@@ -126,6 +126,32 @@ public sealed class VaultService
         return current;
     }
 
+    /// <summary>目标副本已验证并登记后，隔离原目录并移除登记；清单写入失败时恢复原目录。</summary>
+    internal string RetireRepository(VaultLocation vault, VaultRepository repository, VaultLocation target, VaultRepository migrated)
+    {
+        using var manifestLock = AcquireManifestLock(vault.RootPath);
+        using var targetLock = AcquireManifestLock(target.RootPath);
+        // 两端清单均锁定后再次核实目标，防止登记后目标被另一次迁移移走。
+        VerifyRepository(target, migrated);
+        var source = VerifyRepository(vault, repository);
+        var current = Open(vault.RootPath);
+        var retired = Path.Combine(Path.GetDirectoryName(source)!, $".migrated-{Guid.NewGuid():N}");
+        // 先改名而不删除任何文件，使清单保存失败时仍能完整恢复原项目。
+        Directory.Move(source, retired);
+        try
+        {
+            current.Manifest.Repositories.RemoveAll(entry => entry.RepoId == repository.RepoId);
+            JsonFile.Write(Path.Combine(current.RootPath, "vault.json"), current.Manifest,
+                value => Validate(new VaultLocation(current.RootPath, value), vault.Manifest.VaultId));
+        }
+        catch
+        {
+            Directory.Move(retired, source);
+            throw;
+        }
+        return retired;
+    }
+
     /// <summary>立即取得跨进程清单锁；仅将文件共享冲突转换为可读的占用提示。</summary>
     private static FileStream AcquireManifestLock(string root)
     {

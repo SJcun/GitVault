@@ -159,6 +159,7 @@ public sealed class ImportDialogTests
             await RefreshSchedulingTests.VerifyTransferPriorityAsync(viewModel, git);
             await BackupRecoveryTests.VerifySettingsAsync(root);
             await BackupRecoveryTests.VerifyVaultAsync(root, local, git);
+            await MigrationDialogTests.VerifyAsync(root, local, git);
         }
         finally
         {
